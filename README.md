@@ -26,15 +26,15 @@ packages/
                   ai/ (Provider 추상화 · 실패 폴백)
   fixture-admin/  정답을 아는 목 관리자웹. 의도적 버그 10개
 apps/
-  desktop/        Electron 셸 (Phase 5)
+  desktop/        Electron 셸. 엔진을 자식 프로세스로 띄우고 이벤트를 중계한다
 ```
 
 ## 현재 상태
 
-**Phase 4 완료.** 로그인 → 자율 탐색 → 룰 검출 → AI 보강 → `report.md` 까지 동작한다.
+**Phase 5 완료.** Electron 앱에서 **클릭만으로** 로그인 → 자율 탐색 → 룰 검출 → AI 보강 → `report.md` 까지 동작한다.
 fixture 대상 13개 화면을 결정적으로 완주하고, 정답지 8건을 오탐 0건으로 탐지한다.
 AI Provider(Ollama·Claude)를 붙였고, **AI가 죽어도 룰 기반 리포트는 그대로** 나온다.
-Electron 셸은 Phase 5부터.
+패키징(설치본)은 Phase 7부터.
 
 ## 시작하기
 
@@ -78,6 +78,18 @@ pnpm qa --url http://localhost:3100 --user admin --headless --provider claude
 ```
 
 **AI는 덧붙이기만 한다.** Provider가 없거나 죽어도 룰 기반 `report.md`는 그대로 나온다.
+
+## Electron 앱으로 쓰기
+
+```bash
+pnpm --filter @qa/desktop start
+```
+
+프로젝트 생성 → URL·계정 입력 → `QA 시작` 만 누르면 됩니다. 비밀번호는 OS 자격증명
+저장소로 암호화해 보관하고, 실행 중에는 진행 상황과 화면 스크린샷을 실시간으로 봅니다.
+
+기동이 안 되면 [apps/desktop/README.md](apps/desktop/README.md)의
+`ELECTRON_RUN_AS_NODE` 항목을 먼저 확인하세요.
 
 테스트:
 

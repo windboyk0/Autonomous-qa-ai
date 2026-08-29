@@ -20,6 +20,7 @@ import { Explorer, makeStartPlan, type ExploreResult } from "./explorer.js";
 import { judge } from "./judge.js";
 import { renderReport } from "./report.js";
 import { AiGuard, createProvider, enrich, passthrough, type EnrichResult } from "./ai/index.js";
+import { NO_CONTROL, type RunControl } from "./control.js";
 
 export interface RunOutcome {
   status: RunStatus;
@@ -35,6 +36,8 @@ export interface RunOptions {
    * 자기 Provider를 넘길 수도 있다.
    */
   createProvider?: (config: AiProviderConfig) => AiProvider;
+  /** 실행 제어 채널. 없으면 제어 없이 끝까지 돈다. */
+  control?: RunControl;
 }
 
 /**
@@ -151,6 +154,7 @@ function buildSummary(input: {
   explored: ExploreResult;
   issues: Issue[];
   ai: EnrichResult | null;
+  stopped?: boolean;
 }): RunSummary {
   const { runId, config, startedAt, explored, issues } = input;
   const finishedAt = new Date();
@@ -158,7 +162,8 @@ function buildSummary(input: {
 
   return {
     runId,
-    status: "COMPLETED",
+    // 중단으로 끝났으면 그렇게 기록한다. 부분 결과를 완주한 것처럼 보이게 하면 안 된다.
+    status: input.stopped ? "STOPPED" : "COMPLETED",
     startedAt: startedAt.toISOString(),
     finishedAt: finishedAt.toISOString(),
     durationMs: finishedAt.getTime() - startedAt.getTime(),
@@ -265,7 +270,7 @@ export async function runQa(
     }
 
     // ── 자율 탐색 ─────────────────────────────────────────────────────
-    const explorer = new Explorer(session.page, ctx, collector, config);
+    const explorer = new Explorer(session.page, ctx, collector, config, options.control ?? NO_CONTROL);
     const explored = await explorer.explore(makeStartPlan(result.landedUrl));
 
     ctx.writeJson("actions", "graph.json", explored.graph);
@@ -308,6 +313,7 @@ export async function runQa(
       explored,
       issues: enriched.issues,
       ai: enriched,
+      stopped: options.control?.stopped ?? false,
     });
 
     const reportPath = ctx.writeReport(
@@ -331,8 +337,9 @@ export async function runQa(
     });
 
     const c = summary.issueCounts;
+    const stopped = options.control?.stopped ?? false;
     return {
-      status: "COMPLETED",
+      status: stopped ? "STOPPED" : "COMPLETED",
       message:
         `화면 ${explored.graph.nodes.length}개 탐색 · Issue ${judged.issues.length}건 ` +
         `(Critical ${c.critical} · High ${c.high} · Medium ${c.medium} · Low ${c.low}) · ` +

@@ -18,6 +18,7 @@ import { MIN_CONFIDENCE, hitsDenylist, riskAtMost } from "./classify.js";
 import { readState } from "./fingerprint.js";
 import { pathTemplate, queryKeys, sha1 } from "./normalize.js";
 import { hasLoginForm, login } from "./login.js";
+import { NO_CONTROL, type RunControl } from "./control.js";
 
 /**
  * Explorer Agent.
@@ -84,6 +85,7 @@ export class Explorer {
     private readonly ctx: RunContext,
     private readonly collector: Collector,
     private readonly config: RunConfig,
+    private readonly control: RunControl = NO_CONTROL,
   ) {}
 
   private get allowedOrigins(): string[] {
@@ -307,6 +309,13 @@ export class Explorer {
     this.enqueue(startPlan);
 
     while (this.queue.length > 0) {
+      // 일시정지는 화면 하나를 다 보고 나서 걸린다.
+      await this.control.waitIfPaused();
+      if (this.control.stopped) {
+        this.limits.push(`사용자 중단. 큐에 남은 화면 ${this.queue.length}개를 보지 못했습니다.`);
+        break;
+      }
+
       const exhausted = this.budgetExhausted();
       if (exhausted) {
         this.limits.push(`${exhausted}. 큐에 남은 화면 ${this.queue.length}개를 보지 못했습니다.`);
@@ -380,6 +389,10 @@ export class Explorer {
 
       for (const action of actions) {
         if (this.budgetExhausted()) break;
+        // 액션 하나를 실행하기 **전에** 확인한다. 진행 중인 액션을 중간에 끊으면
+        // 대상 시스템이 어중간한 상태로 남을 수 있다.
+        await this.control.waitIfPaused();
+        if (this.control.stopped) break;
         await this.runAction(action, plan, state);
       }
 

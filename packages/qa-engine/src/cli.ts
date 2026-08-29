@@ -2,6 +2,7 @@ import { RunConfig, redactRunConfig } from "@qa/shared";
 import { emit, log, registerSecret } from "./emitter.js";
 import { RunContext, makeRunId } from "./run-context.js";
 import { runQa } from "./run.js";
+import { RunControl } from "./control.js";
 
 /**
  * QA 엔진 CLI 진입점.
@@ -200,7 +201,12 @@ async function main(): Promise<void> {
   log("info", `설정: ${JSON.stringify(redactRunConfig(config))}`);
   log("info", `증적 디렉터리: ${ctx.runDir}`);
 
-  const outcome = await runQa(config, ctx);
+  // Electron이 stdin으로 보내는 일시정지·중단 명령을 받는다.
+  const control = new RunControl();
+  control.listen();
+
+  const outcome = await runQa(config, ctx, { control });
+  control.close();
 
   emit({
     type: "run:status",

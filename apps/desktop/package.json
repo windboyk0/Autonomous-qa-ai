@@ -3,9 +3,34 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
-  "description": "Electron 셸. Phase 5에서 구현한다.",
+  "description": "Electron 셸. 엔진을 자식 프로세스로 띄우고 이벤트를 화면에 중계한다.",
+  "main": "dist/electron/main.cjs",
   "scripts": {
-    "build": "echo \"[desktop] Phase 5에서 구현\"",
-    "typecheck": "echo \"[desktop] Phase 5에서 구현\""
+    "dev": "vite",
+    "build": "node scripts/build-main.mjs && vite build",
+    "typecheck": "tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.json --noEmit",
+    "start": "electron .",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@qa/shared": "workspace:*",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@qa/engine": "workspace:*",
+    "@qa/fixture-admin": "workspace:*",
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@tailwindcss/vite": "^4.0.0",
+    "@vitejs/plugin-react": "^4.3.4",
+    "playwright": "^1.49.1",
+    "electron": "^33.2.1",
+    "esbuild": "^0.24.0",
+    "node-sqlite3-wasm": "^0.8.30",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwindcss": "^4.0.0",
+    "vite": "^5.4.11",
+    "zustand": "^5.0.2"
   }
 }

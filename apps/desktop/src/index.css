@@ -1,0 +1,231 @@
+@import "tailwindcss";
+
+/* 관리자 도구다. 화려함보다 밀도와 가독성이 우선이다. */
+
+body {
+  margin: 0;
+  font-family: "Malgun Gothic", system-ui, sans-serif;
+  font-size: 14px;
+  color: #0f172a;
+  background: #f8fafc;
+}
+
+.app {
+  display: flex;
+  min-height: 100vh;
+}
+
+.side {
+  width: 180px;
+  flex: 0 0 180px;
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 16px 0;
+}
+.side h1 {
+  font-size: 15px;
+  margin: 0 0 16px 16px;
+  color: #fff;
+}
+.side button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 9px 16px;
+  color: #cbd5e1;
+  background: none;
+  border: 0;
+  cursor: pointer;
+  font-size: 13px;
+}
+.side button:hover {
+  background: #1e293b;
+  color: #fff;
+}
+.side button.on {
+  background: #2563eb;
+  color: #fff;
+}
+.running-dot {
+  margin: 16px;
+  padding: 4px 8px;
+  background: #16a34a;
+  color: #fff;
+  border-radius: 4px;
+  font-size: 12px;
+  text-align: center;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+}
+
+.card {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.card h2 {
+  font-size: 14px;
+  font-weight: 600;
+  margin: 0 0 12px;
+  color: #334155;
+}
+.card h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 14px 0 4px;
+  color: #475569;
+}
+
+label {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: #334155;
+}
+label.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+input[type="text"],
+input[type="password"],
+input[type="number"],
+input:not([type]),
+select {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  margin-top: 4px;
+  padding: 6px 8px;
+  border: 1px solid #cbd5e1;
+  border-radius: 4px;
+  font-size: 13px;
+}
+label.row input[type="checkbox"] {
+  width: auto;
+  margin: 0;
+}
+.hint {
+  font-size: 12px;
+  color: #64748b;
+  margin: 4px 0 0;
+}
+
+.btn-primary,
+.btn-ghost {
+  padding: 7px 14px;
+  border-radius: 4px;
+  font-size: 13px;
+  cursor: pointer;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+}
+.btn-primary {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+.btn-primary:disabled,
+.btn-ghost:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.alert-error,
+.alert-warn {
+  padding: 10px 12px;
+  border-radius: 4px;
+  font-size: 13px;
+}
+.alert-error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+}
+.alert-warn {
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  color: #92400e;
+}
+
+.stat {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 6px 12px;
+  margin: 0;
+  font-size: 13px;
+}
+.stat dt {
+  color: #64748b;
+}
+.stat dd {
+  margin: 0;
+  color: #0f172a;
+}
+
+.list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: #334155;
+}
+
+.log {
+  height: 220px;
+  overflow: auto;
+  background: #0f172a;
+  color: #cbd5e1;
+  border-radius: 4px;
+  padding: 8px;
+  font-family: Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.log-warn {
+  color: #fbbf24;
+}
+.log-error {
+  color: #f87171;
+}
+
+.report {
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 16px;
+  font-family: Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  max-height: 75vh;
+  overflow: auto;
+}
+
+.badge {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 3px;
+  background: #e2e8f0;
+  color: #475569;
+  font-size: 11px;
+}
+
+.sev-critical {
+  color: #991b1b;
+  font-weight: 600;
+}
+.sev-high {
+  color: #c2410c;
+  font-weight: 600;
+}
+.sev-medium {
+  color: #a16207;
+}
+.sev-low {
+  color: #64748b;
+}

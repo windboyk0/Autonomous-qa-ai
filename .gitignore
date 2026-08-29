@@ -27,3 +27,6 @@ playwright-report/
 Thumbs.db
 .vscode/
 .idea/
+
+# Electron / Vite 빌드 산출물
+apps/desktop/dist/

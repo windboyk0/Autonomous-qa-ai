@@ -175,13 +175,44 @@ Electron 창을 거치면 사이클이 느려지고, 오류 원인이 UI / IPC /
 - **오탐 판정은 표시만 하고 지우지 않는다.** AI가 틀렸을 때 사람이 되짚을 수 있어야 한다.
 - **Vision 미지원 모델은 스크린샷 분석을 거부한다.** 이미지를 보내면 조용히 헛소리를 한다.
 
-## Phase 5 — Electron 셸
+## Phase 5 — Electron 셸 ✅
 
-- Main: 엔진을 child process로 실행, stdout 이벤트 스트림 → IPC → Renderer
-- SQLite(projects / runs / issues), 자격증명은 `safeStorage`
-- 화면은 18개 전부가 아니라 **6개만**: 프로젝트 / QA설정 / Monitor / Issue목록·상세 / Evidence·Screenshot / Report
+- [x] Main: 엔진을 child process로 실행, stdout JSON Lines → IPC → Renderer
+- [x] SQLite(projects / qa_runs / qa_issues) — WASM SQLite
+- [x] 자격증명은 `safeStorage`로 암호화, 렌더러에 읽는 경로 없음
+- [x] 화면 7개: 프로젝트 / QA설정 / Monitor / Issue / 증적 / 리포트 / History
+- [x] 엔진 stdin 제어 채널 (Pause / Resume / Stop)
 
-**DoD** — 클릭만으로 Phase 4와 **동일한** `report.md` 생성. 엔진 크래시가 UI를 죽이지 않음
+**DoD 결과 — 통과 (테스트 185건 누계)**
+
+| 검증 | 결과 |
+|---|---|
+| **클릭만으로 리포트 생성** | 프로젝트 생성 → 설정 → QA 시작 → 리포트까지 통과 |
+| 화면에 뜬 리포트가 Phase 3·4와 동일 | 17개 목차 확인 |
+| **엔진 비정상 종료 시 UI 생존** | 통과, 실패 Run도 History에 기록 |
+| 렌더러가 Node에 직접 접근 | 불가 (`require`·`process` 없음) |
+| preload에 자격증명 읽는 API | 없음 |
+| 화면·DB에 비밀번호 평문 | 0건 |
+
+### Phase 5에서 확정된 설계
+
+- **main 프로세스는 CJS 번들이어야 한다.** `node_modules/electron`은 실행 파일 경로만
+  문자열로 내보내는 npm 셸이고, ESM 해석기는 그쪽을 먼저 찾는다. 그래서 ESM main에서는
+  `import { app } from "electron"` 도 `createRequire("electron")` 도 전부 문자열을 받는다
+  (실측 확인). esbuild로 CJS 번들을 만들면 Electron이 패치한 `require`가 내장 모듈을 준다.
+  `@qa/shared`(ESM)는 번들에 인라인한다 — Phase 7 패키징에도 필요한 단계다.
+- **`ELECTRON_RUN_AS_NODE`를 지우고 Electron을 띄운다.** 이 값이 켜져 있으면 Electron이
+  순수 Node로 실행되어 앱이 기동조차 못 한다. VS Code 같은 Electron 기반 도구가
+  자식 프로세스에 심어두므로 개발 환경에서 조용히 상속된다.
+  (반대로 **엔진을 띄울 때는 일부러 켠다** — 사용자 PC에 Node가 없어도 Electron을 Node로 재사용한다)
+- **제어 채널의 stdin은 unref한다.** 부모가 연 파이프는 끝나지 않으므로 readline이
+  참조를 쥐고 있으면 리포트를 다 쓴 뒤에도 엔진이 종료되지 않는다. 실측에서
+  리포트는 나왔는데 화면의 중단 버튼이 영원히 활성 상태로 남았다.
+- **네이티브 SQLite를 쓰지 않는다.** Electron 33은 Node 20을 품고 있어 `node:sqlite`가
+  없고, better-sqlite3는 Electron ABI에 맞춰 다시 빌드해야 해서 사용자 PC마다
+  빌드 도구가 필요해진다. 설치본 하나로 끝나야 하는 제품에 맞지 않는다.
+- **증적은 main이 data URL로 넘긴다.** 렌더러에 파일시스템 접근을 주지 않고,
+  렌더러가 보낸 상대경로는 `safeJoin`으로 경로 탈출을 막는다.
 
 ## Phase 6 — 쓰기 테스트 (CRUD)
 
