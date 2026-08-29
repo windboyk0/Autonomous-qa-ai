@@ -61,6 +61,88 @@ function candidate(input: {
 const STATIC_RESOURCE = new Set(["image", "font", "stylesheet", "media", "manifest"]);
 const SLOW_MS = 3000;
 
+/**
+ * 응답 없이 실패한 요청의 사유를 가른다.
+ *
+ * **브라우저가 알려주는 사유를 그대로 살려야 한다.** 전부 "요청이 전송되지 못했습니다"로
+ * 뭉뚱그리면 사용자가 무엇을 고쳐야 할지 알 수 없다.
+ * 실측: `ERR_BLOCKED_BY_ORB` 로 로고 이미지가 차단된 건이 "네트워크·차단·잘못된 URL을
+ * 확인하세요"라는 안내를 받았다. 원인이 명확한데 안내는 모호했다.
+ */
+function classifyFailure(
+  failureText: string,
+  resourceType: string,
+): { ruleId: string; severity: Severity; note: string } {
+  // 브라우저가 크로스 오리진 응답을 차단한 경우 (ORB / CORB).
+  if (/ERR_BLOCKED_BY_ORB|ERR_BLOCKED_BY_RESPONSE/i.test(failureText)) {
+    return {
+      ruleId: "NET-BLOCKED-ORB",
+      severity: "MEDIUM",
+      note:
+        `브라우저가 다른 출처의 응답을 차단했습니다. ` +
+        `${resourceType === "image" ? "이미지" : "리소스"}로 요청했는데 응답의 Content-Type이 ` +
+        `그에 맞지 않을 때 생깁니다(예: 이미지 요청에 application/json 응답). ` +
+        `해당 화면 요소가 비어 보입니다.`,
+    };
+  }
+
+  // 광고 차단기·확장 프로그램·보안 정책이 막은 경우. 대상 시스템의 결함이 아닐 수 있다.
+  if (/ERR_BLOCKED_BY_CLIENT|ERR_BLOCKED_BY_ADMINISTRATOR/i.test(failureText)) {
+    return {
+      ruleId: "NET-BLOCKED-CLIENT",
+      severity: "LOW",
+      note: "브라우저 확장이나 정책이 차단했을 수 있습니다. 대상 시스템의 결함이 아닐 수 있습니다.",
+    };
+  }
+
+  /**
+   * 앱이 스스로 취소한 요청.
+   * SPA에서 컴포넌트가 언마운트되거나 화면이 넘어갈 때 흔히 생기며 대부분 정상이다.
+   * 숨기지는 않되 심각도를 낮춘다 — 이걸 MEDIUM으로 올리면 리포트가 잡음으로 덮인다.
+   */
+  if (/ERR_ABORTED|net::ERR_CONNECTION_ABORTED/i.test(failureText)) {
+    return {
+      ruleId: "NET-ABORTED",
+      severity: "LOW",
+      note: "화면 전환 등으로 앱이 스스로 취소한 요청일 수 있습니다. 의도한 것인지 확인하세요.",
+    };
+  }
+
+  if (/cors|cross-origin/i.test(failureText)) {
+    return {
+      ruleId: "NET-CORS",
+      severity: "HIGH",
+      note: "서버의 CORS 허용 origin 설정을 확인하세요.",
+    };
+  }
+
+  if (/timed?\s*out|timeout/i.test(failureText)) {
+    return { ruleId: "NET-TIMEOUT", severity: "HIGH", note: "응답이 제한 시간 안에 오지 않았습니다." };
+  }
+
+  if (/ERR_NAME_NOT_RESOLVED|ERR_CONNECTION_REFUSED|ERR_CONNECTION_RESET/i.test(failureText)) {
+    return {
+      ruleId: "NET-UNREACHABLE",
+      severity: "HIGH",
+      note: "주소를 찾지 못했거나 서버가 연결을 거부했습니다. 호스트와 포트를 확인하세요.",
+    };
+  }
+
+  if (/ERR_CERT|ERR_SSL/i.test(failureText)) {
+    return {
+      ruleId: "NET-TLS",
+      severity: "HIGH",
+      note: "인증서 문제로 연결이 거부되었습니다.",
+    };
+  }
+
+  return {
+    ruleId: "NET-FAILED",
+    severity: "MEDIUM",
+    note: "요청이 서버에 닿지 못했습니다. 주소와 네트워크 경로를 확인하세요.",
+  };
+}
+
 export function detectNetwork(entries: NetworkEntry[], screen: ScreenContext): IssueCandidate[] {
   const out: Array<IssueCandidate | null> = [];
   const evidenceId = screen.evidenceIdByKind.network;
@@ -69,16 +151,16 @@ export function detectNetwork(entries: NetworkEntry[], screen: ScreenContext): I
     const where = `${e.method} ${e.endpointTemplate}`;
 
     if (e.failureText !== null) {
-      const cors = /cors|cross-origin/i.test(e.failureText);
-      const timeout = /timed?\s*out|timeout/i.test(e.failureText);
-      const ruleId = cors ? "NET-CORS" : timeout ? "NET-TIMEOUT" : "NET-FAILED";
+      const { ruleId, severity, note } = classifyFailure(e.failureText, e.resourceType);
       out.push(
         candidate({
           source: "network",
           ruleId,
           title: `요청 실패: ${where}`,
-          description: `${where} 요청이 응답 없이 실패했습니다. (${e.failureText})`,
-          severity: ruleId === "NET-FAILED" ? "MEDIUM" : "HIGH",
+          description:
+            `${where} (${e.resourceType}) 요청이 응답 없이 실패했습니다.\n` +
+            `브라우저 사유: ${e.failureText}\n${note}`,
+          severity,
           dedupKey: sha1(`network|${ruleId}|${e.endpointTemplate}|none`),
           evidenceId,
           screen,
