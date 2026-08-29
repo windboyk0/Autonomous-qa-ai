@@ -1,0 +1,11 @@
+{
+  "name": "@qa/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Electron 셸. Phase 5에서 구현한다.",
+  "scripts": {
+    "build": "echo \"[desktop] Phase 5에서 구현\"",
+    "typecheck": "echo \"[desktop] Phase 5에서 구현\""
+  }
+}
