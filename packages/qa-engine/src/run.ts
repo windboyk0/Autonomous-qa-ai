@@ -244,7 +244,8 @@ export async function runQa(
     );
 
     const result = await login(session.page, config.login, config.targetUrl);
-    log("info", result.reason);
+    log(result.success ? "info" : "warn", result.reason);
+    if (result.warning) log("warn", result.warning);
 
     ctx.writeJson("actions", "login.json", {
       success: result.success,
@@ -252,6 +253,7 @@ export async function runQa(
       reason: result.reason,
       signals: result.signals,
       usedSelectors: result.usedSelectors,
+      warning: result.warning,
     });
 
     if (!result.success) {

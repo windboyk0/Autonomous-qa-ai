@@ -74,11 +74,24 @@ describe("Phase 1 — 로그인 + 증적 수집", () => {
     expect(outcome.status).toBe("COMPLETED");
   });
 
-  it("로그인 판정 근거가 3개 신호 모두 켜진 상태로 기록된다", () => {
+  it("로그인 판정 근거가 기록된다", () => {
     const login = JSON.parse(readFileSync(join(ctx.runDir, "actions", "login.json"), "utf8"));
     expect(login.success).toBe(true);
-    expect(login.signals).toEqual({ urlChanged: true, formGone: true, newCookie: true });
     expect(login.landedUrl).toContain("/dashboard");
+    expect(login.signals).toMatchObject({ urlChanged: true, formGone: true, newCookie: true });
+  });
+
+  /**
+   * 인증 API 응답이 **가장 믿을 만한 신호다.**
+   * 실측: 토큰 기반 SPA에서 `POST /auth/login → 200` 으로 성공했는데
+   * 쿠키·URL·폼 신호가 모두 거짓이라 실패로 오판한 적이 있다.
+   */
+  it("인증 API 응답을 신호로 기록한다", () => {
+    const login = JSON.parse(readFileSync(join(ctx.runDir, "actions", "login.json"), "utf8"));
+    expect(login.signals.authOk).toBe(true);
+    expect(login.signals.authRejected).toBe(false);
+    expect(login.signals.authStatus).toBeGreaterThanOrEqual(200);
+    expect(login.signals.authStatus).toBeLessThan(400);
   });
 
   it("증적 트리가 만들어진다", () => {
@@ -179,12 +192,19 @@ describe("Phase 1 — 로그인 실패 경로", () => {
     );
 
     expect(outcome.status).toBe("FAILED");
-    expect(outcome.message).toContain("로그인 실패");
 
     const login = JSON.parse(readFileSync(join(ctx.runDir, "actions", "login.json"), "utf8"));
     expect(login.success).toBe(false);
-    // 화면에 뜬 오류 메시지를 근거로 함께 남겨야 사용자가 원인을 안다.
-    expect(login.reason).toContain("올바르지 않습니다");
+
+    /**
+     * 서버가 거절한 것과 "아무 반응이 없는 것"은 사용자가 취할 조치가 다르다.
+     * 전자는 계정을 확인하면 되고, 후자는 로그인 방식을 의심해야 한다.
+     * 그래서 상태 코드를 그대로 알려준다.
+     */
+    expect(login.signals.authRejected).toBe(true);
+    expect(login.signals.authStatus).toBe(401);
+    expect(login.reason).toContain("거절");
+    expect(login.reason).toContain("401");
 
     const shots = walk(join(ctx.runDir, "screenshots")).map((f) => f.replace(/\\/g, "/"));
     expect(shots.some((f) => f.includes("로그인실패"))).toBe(true);

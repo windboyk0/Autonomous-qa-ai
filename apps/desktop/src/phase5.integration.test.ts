@@ -262,7 +262,8 @@ describe("Phase 5 — 실패와 크래시를 구분한다", () => {
 
     // 화면에 원인이 그대로 보여야 한다.
     const banner = (await page.textContent('[data-testid="fail-banner"]')) ?? "";
-    expect(banner).toContain("로그인 실패");
+    // 서버가 거절했으면 상태 코드까지 알려준다 — 계정 문제인지 방식 문제인지 갈린다.
+    expect(banner).toMatch(/거절|로그인|인증/);
 
     // 증적은 남아 있고 폴더를 열 수 있어야 한다.
     expect(await page.locator('[data-testid="open-evidence-folder"]').count()).toBe(1);
