@@ -30,6 +30,14 @@ export const ConsoleEntry = z.object({
   text: z.string(),
   /** 반복 오류 병합용 지문: 메시지에서 숫자/URL/해시를 제거한 뒤 sha1 */
   signature: z.string(),
+  /**
+   * unhandled promise rejection에서 온 항목인가.
+   *
+   * Playwright의 `pageerror`는 uncaught exception과 rejection을 구별해 주지 않는다.
+   * 페이지에 심은 `unhandledrejection` 리스너가 표시해 준 것만 참이 된다.
+   * CON-REJECTION과 CON-UNCAUGHT를 가르는 유일한 근거다.
+   */
+  isRejection: z.boolean().default(false),
   url: z.string().nullable(),
   lineNumber: z.number().int().nullable(),
   stack: z.string().nullable(),

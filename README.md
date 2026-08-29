@@ -22,6 +22,7 @@ packages/
                   cli.ts 인자파싱 · run.ts Run본체
                   login.ts · collector.ts · capture.ts (증적)
                   fingerprint.ts · discover.ts · classify.ts · explorer.ts (탐색)
+                  visual.ts · detect.ts · judge.ts · report.ts (검출·리포트)
   fixture-admin/  정답을 아는 목 관리자웹. 의도적 버그 10개
 apps/
   desktop/        Electron 셸 (Phase 5)
@@ -29,9 +30,9 @@ apps/
 
 ## 현재 상태
 
-**Phase 2 완료.** 로그인 → 자율 탐색 → 증적 수집까지 동작한다.
-fixture 대상 13개 화면을 결정적으로 완주하며, 위험 액션은 하나도 실행하지 않는다.
-룰 기반 검출과 `report.md` 생성은 Phase 3부터.
+**Phase 3 완료.** 로그인 → 자율 탐색 → 룰 검출 → `report.md` 까지 **AI 없이** 동작한다.
+fixture 대상 13개 화면을 결정적으로 완주하고, 정답지 8건을 오탐 0건으로 탐지한다.
+AI Provider 연동은 Phase 4부터.
 
 ## 시작하기
 

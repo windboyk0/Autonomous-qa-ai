@@ -6,6 +6,7 @@ import {
   type NetworkEntry,
 } from "@qa/shared";
 import { consoleSignature, endpointTemplate } from "./normalize.js";
+import { REJECTION_MARKER } from "./browser.js";
 
 /**
  * Evidence Agent (수집부).
@@ -51,6 +52,13 @@ export class Collector {
   private readonly console: PendingConsole[] = [];
   private readonly network: PendingNetwork[] = [];
   private readonly startedAt = new Map<Request, number>();
+  /**
+   * rejection으로 확인된 메시지들.
+   *
+   * 같은 오류가 표식 붙은 console 이벤트와 표식 없는 pageerror 이벤트로 **두 번** 온다.
+   * 어느 쪽이 먼저 올지는 보장되지 않으므로 양방향으로 합친다.
+   */
+  private readonly rejectionMessages = new Set<string>();
 
   attach(page: Page): void {
     page.on("console", (msg) => {
@@ -58,11 +66,28 @@ export class Collector {
       if (level !== "error" && level !== "warning") return; // log/info/debug는 잡음이다
       const loc = msg.location();
       const url = loc.url || null;
-      if (isBrowserNoise(msg.text(), url)) return;
+      const raw = msg.text();
+      if (isBrowserNoise(raw, url)) return;
+
+      const isRejection = raw.startsWith(REJECTION_MARKER);
+      // 표식은 지문에 섞이면 안 된다. 같은 오류의 pageerror 판본과 지문이 달라진다.
+      const text = isRejection ? raw.slice(REJECTION_MARKER.length).trim() : raw;
+
+      if (isRejection) {
+        this.rejectionMessages.add(text);
+        // pageerror가 먼저 도착해 이미 담겼다면 그쪽을 rejection으로 승격시키고 끝낸다.
+        const existing = this.console.find((c) => c.text === text && !c.isRejection);
+        if (existing) {
+          existing.isRejection = true;
+          return;
+        }
+      }
+
       this.console.push({
         level: level === "warning" ? "warning" : "error",
-        text: msg.text(),
-        signature: consoleSignature(msg.text()),
+        text,
+        signature: consoleSignature(text),
+        isRejection,
         url,
         lineNumber: Number.isFinite(loc.lineNumber) ? loc.lineNumber : null,
         stack: null,
@@ -73,10 +98,14 @@ export class Collector {
     // uncaught exception. console 이벤트로는 스택이 안 오므로 따로 받는다.
     page.on("pageerror", (err) => {
       const text = err.message;
+      // 표식 붙은 console 이벤트로 이미 담긴 rejection이면 중복이다.
+      if (this.rejectionMessages.has(text) && this.console.some((c) => c.text === text)) return;
+
       this.console.push({
         level: "error",
         text,
         signature: consoleSignature(text),
+        isRejection: this.rejectionMessages.has(text),
         url: null,
         lineNumber: null,
         stack: err.stack ?? null,

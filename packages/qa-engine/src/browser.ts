@@ -27,6 +27,25 @@ function installEsbuildNameShim(): void {
   g.__name ??= (fn: unknown) => fn;
 }
 
+/** 콘솔 수집기가 rejection을 알아보기 위한 표식. collector.ts와 짝을 이룬다. */
+export const REJECTION_MARKER = "[qa:unhandled-rejection]";
+
+/**
+ * `unhandledrejection`을 콘솔 스트림에 표식과 함께 흘린다.
+ *
+ * Playwright의 `pageerror`는 uncaught exception과 promise rejection을 구별해 주지 않아서,
+ * 페이지 쪽에서 직접 표시해 주지 않으면 둘을 나눌 방법이 없다.
+ * (같은 오류가 pageerror로도 한 번 오므로 collector가 중복을 합친다)
+ */
+function installRejectionReporter(): void {
+  const MARKER = "[qa:unhandled-rejection]";
+  window.addEventListener("unhandledrejection", (event) => {
+    const reason = event.reason as { message?: string } | undefined;
+    const message = reason?.message ?? String(event.reason);
+    console.error(`${MARKER} ${message}`);
+  });
+}
+
 export async function launch(config: RunConfig): Promise<BrowserSession> {
   const browser = await chromium.launch({ headless: config.headless });
 
@@ -41,6 +60,7 @@ export async function launch(config: RunConfig): Promise<BrowserSession> {
   context.setDefaultNavigationTimeout(config.budget.navigationTimeoutMs);
 
   await context.addInitScript(installEsbuildNameShim);
+  await context.addInitScript(installRejectionReporter);
 
   const page = await context.newPage();
 

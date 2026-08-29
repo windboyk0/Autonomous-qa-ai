@@ -6,12 +6,14 @@ import type {
   PageState,
   RunConfig,
   StateGraph,
+  IssueCandidate,
 } from "@qa/shared";
 import { emit, log } from "./emitter.js";
 import { captureScreen } from "./capture.js";
 import type { Collector } from "./collector.js";
 import type { RunContext } from "./run-context.js";
 import { discoverActions } from "./discover.js";
+import { detectConsole, detectNetwork, detectVisual } from "./detect.js";
 import { MIN_CONFIDENCE, hitsDenylist, riskAtMost } from "./classify.js";
 import { readState } from "./fingerprint.js";
 import { pathTemplate, queryKeys, sha1 } from "./normalize.js";
@@ -61,6 +63,8 @@ export interface ExploreResult {
   actionResults: ActionResult[];
   /** 예산 소진·차단 등으로 보지 못한 영역. 리포트의 "탐색 제한"에 그대로 들어간다. */
   limits: string[];
+  /** 룰 검출기가 화면마다 만들어낸 후보. Issue Judge가 여기서 최종 Issue를 만든다. */
+  candidates: IssueCandidate[];
 }
 
 export class Explorer {
@@ -70,6 +74,7 @@ export class Explorer {
   private readonly queue: Plan[] = [];
   private readonly enqueued = new Set<string>();
   private readonly limits: string[] = [];
+  private readonly candidates: IssueCandidate[] = [];
 
   private actionsExecuted = 0;
   private readonly startedAt = Date.now();
@@ -336,11 +341,28 @@ export class Explorer {
         }
       }
 
-      const evidences = await captureScreen(this.page, this.ctx, this.collector, {
+      const capture = await captureScreen(this.page, this.ctx, this.collector, {
         stateKey: state.stateKey,
         screenName: state.screenName,
       });
-      const shot = evidences.find((e) => e.kind === "screenshot");
+      const shot = capture.evidences.find((e) => e.kind === "screenshot");
+
+      // ── 룰 기반 검출 ────────────────────────────────────────────────
+      const screenCtx = {
+        stateKey: state.stateKey,
+        screenName: state.screenName,
+        url: state.url,
+        evidenceIdByKind: capture.evidenceIdByKind as Partial<Record<string, string>>,
+      };
+      const found = [
+        ...detectNetwork(capture.network, screenCtx),
+        ...detectConsole(capture.console, screenCtx),
+        ...detectVisual(capture.visual, capture.loadingStuck, screenCtx),
+      ];
+      this.candidates.push(...found);
+      for (const c of found) {
+        log("info", `[${c.ruleId}] ${c.screenName}: ${c.title}`);
+      }
 
       emit({
         type: "state:visited",
@@ -375,7 +397,14 @@ export class Explorer {
     const graph: StateGraph = { nodes: [...this.visitedStates.values()], edges: this.edges };
     this.ctx.writeJson("actions", "results.json", this.results);
 
-    return { graph, actionResults: this.results, limits: this.limits };
+    this.ctx.writeJson("actions", "candidates.json", this.candidates);
+
+    return {
+      graph,
+      actionResults: this.results,
+      limits: this.limits,
+      candidates: this.candidates,
+    };
   }
 }
 

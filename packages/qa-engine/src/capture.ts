@@ -1,8 +1,9 @@
 import type { Page } from "playwright";
-import type { Evidence } from "@qa/shared";
+import type { ConsoleEntry, Evidence, NetworkEntry, VisualMetrics } from "@qa/shared";
 import type { Collector } from "./collector.js";
 import { RunContext } from "./run-context.js";
 import { log } from "./emitter.js";
+import { measureVisual } from "./visual.js";
 
 /**
  * Evidence Agent (캡처부).
@@ -16,6 +17,8 @@ export interface CaptureOptions {
   /** 비밀번호가 입력된 상태의 화면은 찍지 않는다. 찍기 전에 비운다. */
   clearPasswordFields?: boolean;
   fullPage?: boolean;
+  /** 화면 계측을 건너뛴다. 로그인 화면처럼 검출 대상이 아닌 곳에서 쓴다. */
+  measureVisual?: boolean;
 }
 
 /** DOM에서 script/style 내용을 제거한다. 원본의 1/5 이하로 줄고 토큰·디스크를 아낀다. */
@@ -32,13 +35,29 @@ async function sanitizedHtml(page: Page): Promise<string> {
   });
 }
 
+/**
+ * 한 화면에서 모은 것 전부.
+ *
+ * 파일로 떨어뜨리는 것과 별개로, 검출기(Phase 3)가 바로 쓸 수 있게 값도 함께 돌려준다.
+ * 파일을 다시 읽어 파싱하는 경로를 만들면 마스킹·인코딩이 두 군데로 갈라진다.
+ */
+export interface ScreenCapture {
+  evidences: Evidence[];
+  console: ConsoleEntry[];
+  network: NetworkEntry[];
+  visual: VisualMetrics | null;
+  loadingStuck: boolean;
+  /** 검출기가 후보에 붙일 대표 증적 id. 종류별로 하나씩. */
+  evidenceIdByKind: Partial<Record<Evidence["kind"], string>>;
+}
+
 export async function captureScreen(
   page: Page,
   ctx: RunContext,
   collector: Collector,
   screen: { stateKey: string; screenName: string },
   options: CaptureOptions = {},
-): Promise<Evidence[]> {
+): Promise<ScreenCapture> {
   const seq = ctx.nextSeq();
   const slug = RunContext.slug(screen.screenName);
   const base = `${seq}-${slug}`;
@@ -120,6 +139,32 @@ export async function captureScreen(
     log("warn", `ARIA 스냅샷 실패 (${screen.screenName}): ${String(err)}`);
   }
 
+  // ── visual 계측 ─────────────────────────────────────────────────────
+  let visual: VisualMetrics | null = null;
+  let loadingStuck = false;
+  if (options.measureVisual !== false) {
+    try {
+      const reading = await measureVisual(page);
+      visual = reading.metrics;
+      loadingStuck = reading.loadingStuck;
+      const rel = ctx.writeJson("visual", `${base}.json`, { ...reading.metrics, loadingStuck });
+      made.push(
+        ctx.addEvidence({
+          kind: "visual",
+          ...screen,
+          path: rel,
+          summary:
+            `가로오버플로=${reading.metrics.hasHorizontalOverflow} · ` +
+            `겹침 ${reading.metrics.overlappingPairs.length}건 · ` +
+            `잘림 ${reading.metrics.truncatedTexts.length}건` +
+            (loadingStuck ? " · 로딩 미종료" : ""),
+        }),
+      );
+    } catch (err) {
+      log("warn", `화면 계측 실패 (${screen.screenName}): ${String(err)}`);
+    }
+  }
+
   // ── console / network ───────────────────────────────────────────────
   const drained = collector.drain(screen);
 
@@ -149,5 +194,15 @@ export async function captureScreen(
     );
   }
 
-  return made;
+  const evidenceIdByKind: ScreenCapture["evidenceIdByKind"] = {};
+  for (const ev of made) evidenceIdByKind[ev.kind] ??= ev.id;
+
+  return {
+    evidences: made,
+    console: drained.console,
+    network: drained.network,
+    visual,
+    loadingStuck,
+    evidenceIdByKind,
+  };
 }

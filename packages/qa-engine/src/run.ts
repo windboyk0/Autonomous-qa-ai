@@ -1,15 +1,109 @@
-import type { RunConfig, RunStatus } from "@qa/shared";
-import { log } from "./emitter.js";
+import {
+  redactRunConfig,
+  type ActionResult,
+  type Issue,
+  type IssuesFile,
+  type RunConfig,
+  type RunStatus,
+  type RunSummary,
+} from "@qa/shared";
+import { emit, log } from "./emitter.js";
 import { launch, preflightBrowser } from "./browser.js";
 import { Collector } from "./collector.js";
 import { captureScreen } from "./capture.js";
 import { login } from "./login.js";
 import type { RunContext } from "./run-context.js";
-import { Explorer, makeStartPlan } from "./explorer.js";
+import { Explorer, makeStartPlan, type ExploreResult } from "./explorer.js";
+import { judge } from "./judge.js";
+import { renderReport } from "./report.js";
 
 export interface RunOutcome {
   status: RunStatus;
   message: string;
+}
+
+/**
+ * 미검증 영역을 액션 기록에서 뽑아낸다.
+ *
+ * 차단은 성공이지만 **숨기면 실패다.** 실행하지 않은 것을 리포트에 적지 않으면
+ * 사용자는 전부 검증했다고 착각한다. 이 도구의 가장 위험한 실패 모드다.
+ */
+function unverifiedAreas(results: ActionResult[], config: RunConfig): string[] {
+  const grouped = new Map<string, { screens: Set<string>; reason: string; count: number }>();
+  for (const r of results) {
+    if (r.outcome === "EXECUTED") continue;
+    const key = `${r.action.label}|${r.outcome}`;
+    const entry = grouped.get(key) ?? { screens: new Set<string>(), reason: r.reason, count: 0 };
+    entry.screens.add(r.action.screenName);
+    entry.count += 1;
+    grouped.set(key, entry);
+  }
+
+  const out = [...grouped.entries()]
+    .sort((a, b) => b[1].count - a[1].count)
+    .map(([key, v]) => {
+      const label = key.split("|")[0];
+      return `"${label}" — ${v.count}회 발견, 실행하지 않음 (${v.reason}). 화면: ${[...v.screens].join(", ")}`;
+    });
+
+  for (const kind of ["create", "update", "delete"] as const) {
+    if (!config.crud[kind]) out.push(`${kind.toUpperCase()} 테스트 — 설정에서 꺼져 있어 실행하지 않았습니다.`);
+  }
+  if (config.ai.kind === "none") {
+    out.push("AI 분석 (원인 추정·화면 평가·기능 누락 후보) — Provider를 사용하지 않았습니다.");
+  }
+
+  return out;
+}
+
+function buildSummary(input: {
+  runId: string;
+  config: RunConfig;
+  startedAt: Date;
+  explored: ExploreResult;
+  issues: Issue[];
+}): RunSummary {
+  const { runId, config, startedAt, explored, issues } = input;
+  const finishedAt = new Date();
+  const count = (s: Issue["severity"]) => issues.filter((i) => i.severity === s).length;
+
+  return {
+    runId,
+    status: "COMPLETED",
+    startedAt: startedAt.toISOString(),
+    finishedAt: finishedAt.toISOString(),
+    durationMs: finishedAt.getTime() - startedAt.getTime(),
+    // 리포트로 나가는 설정은 반드시 마스킹된 판본이어야 한다.
+    config: redactRunConfig(config),
+    screensExplored: explored.graph.nodes.length,
+    actionsExecuted: explored.actionResults.filter((r) => r.outcome === "EXECUTED").length,
+    actionsSkipped: explored.actionResults.filter((r) => r.outcome !== "EXECUTED").length,
+    issueCounts: {
+      critical: count("CRITICAL"),
+      high: count("HIGH"),
+      medium: count("MEDIUM"),
+      low: count("LOW"),
+    },
+    crud: (["CREATE", "READ", "UPDATE", "DELETE"] as const).map((kind) => {
+      const on = kind === "READ" ? config.crud.read : config.crud[kind.toLowerCase() as "create"];
+      return {
+        kind,
+        executed: kind === "READ",
+        pass: 0,
+        fail: 0,
+        skipped: 0,
+        notExecutedReason: on
+          ? kind === "READ"
+            ? null
+            : "쓰기 테스트는 Phase 6에서 구현됩니다."
+          : "설정에서 꺼져 있습니다.",
+      };
+    }),
+    aiStatus: config.ai.kind === "none" ? "not_used" : "not_used",
+    aiFailureReason: null,
+    explorationLimits: explored.limits,
+    unverifiedAreas: unverifiedAreas(explored.actionResults, config),
+  };
 }
 
 /**
@@ -21,6 +115,7 @@ export interface RunOutcome {
  * 이 함수만 직접 호출할 수 있게 하기 위해서다.
  */
 export async function runQa(config: RunConfig, ctx: RunContext): Promise<RunOutcome> {
+  const startedAt = new Date();
   const pre = await preflightBrowser();
   if (!pre.ok) {
     log("error", pre.remediation ?? "브라우저를 기동할 수 없습니다.");
@@ -91,12 +186,44 @@ export async function runQa(config: RunConfig, ctx: RunContext): Promise<RunOutc
     );
     for (const limit of explored.limits) log("warn", `탐색 제한: ${limit}`);
 
-    log("warn", "룰 기반 검출과 리포트 생성은 Phase 3에서 구현됩니다.");
+    // ── Issue 확정 ────────────────────────────────────────────────────
+    const judged = judge(explored.candidates, explored.graph);
+    log(
+      "info",
+      `Issue 확정: 후보 ${judged.mergedFrom}건 → Issue ${judged.issues.length}건`,
+    );
+    for (const issue of judged.issues) {
+      emit({ type: "issue:found", at: new Date().toISOString(), issue });
+    }
 
+    // ── 리포트 ────────────────────────────────────────────────────────
+    const summary = buildSummary({
+      runId: ctx.runId,
+      config,
+      startedAt,
+      explored,
+      issues: judged.issues,
+    });
+
+    const reportPath = ctx.writeReport(
+      renderReport({ summary, issues: judged.issues, evidences: ctx.listEvidences() }),
+    );
+    const issuesPath = ctx.writeIssues({ schemaVersion: 1, summary, issues: judged.issues });
+
+    emit({
+      type: "run:finished",
+      at: new Date().toISOString(),
+      summary,
+      reportPath,
+      issuesPath,
+    });
+
+    const c = summary.issueCounts;
     return {
       status: "COMPLETED",
       message:
-        `화면 ${explored.graph.nodes.length}개 탐색 · 액션 ${executed}건 실행 · ` +
+        `화면 ${explored.graph.nodes.length}개 탐색 · Issue ${judged.issues.length}건 ` +
+        `(Critical ${c.critical} · High ${c.high} · Medium ${c.medium} · Low ${c.low}) · ` +
         `증적 ${ctx.listEvidences().length}건`,
     };
   } finally {

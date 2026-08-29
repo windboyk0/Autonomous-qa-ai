@@ -48,3 +48,29 @@ POST http://localhost:3100/__reset
 ```
 
 시드 데이터는 난수를 쓰지 않으므로 서버 재시작 없이도 항상 같은 상태로 돌아간다.
+
+---
+
+## 실측 채점 결과 (Phase 3)
+
+`packages/qa-engine/src/phase3.integration.test.ts` 가 매 실행마다 이 표를 검증한다.
+
+| 검출 단계 | 대상 | 결과 |
+|---|---|---|
+| Phase 3 (읽기 전용) | BUG-01·02·03·04·07·08·09·10 | **8/8 탐지, 오탐 0건** |
+| Phase 6 (쓰기 테스트) | BUG-05·06 | 미착수 |
+
+확정된 Issue 8건 (후보 520건에서 병합):
+
+| ID | 우선순위 | 심각도 | 룰 | 대응 |
+|---|---|---|---|---|
+| QA-0001 | P0 | HIGH | CON-UNCAUGHT | BUG-03 |
+| QA-0002 | P0 | HIGH | NET-5XX | BUG-01 |
+| QA-0003 | P1 | MEDIUM | CON-REJECTION | BUG-04 |
+| QA-0004 | P1 | MEDIUM | NET-4XX | BUG-02 |
+| QA-0005 | P1 | HIGH | FUNC-INFINITE-LOADING | BUG-10 |
+| QA-0006 | P2 | LOW | VIS-TRUNCATE | BUG-09 |
+| QA-0007 | P2 | MEDIUM | VIS-OVERFLOW | BUG-07 |
+| QA-0008 | P3 | LOW | VIS-OVERLAP | BUG-08 |
+
+**BUG-02 병합**: 12개 화면에서 후보 332건 → Issue 1건 + Evidence 13건.

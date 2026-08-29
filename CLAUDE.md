@@ -508,7 +508,7 @@ LOW:
 
 ## 18. Priority
 
-Severity와 분리.
+Severity와 분리한다. 단 **Severity가 대역을 정하고 점수는 그 안에서 순서를 정한다.**
 
 ```text
 Priority Score =
@@ -519,11 +519,22 @@ Severity Weight
 ÷ Fix Effort
 ```
 
-결과:
-- P0
-- P1
-- P2
-- P3
+| Severity | 가능한 Priority |
+|---|---|
+| CRITICAL | P0 |
+| HIGH | P0 ~ P1 |
+| MEDIUM | P1 ~ P2 |
+| LOW | P2 ~ P3 |
+
+대역이 필요한 이유는 실측에서 드러났다. 곱셈식만 쓰면 **"넓게 퍼짐"이 "심각함"을 덮는다** —
+화면이 아예 열리지 않는 HIGH 결함(1개 화면)이 P3으로, 모든 화면에 반복되는 MEDIUM 콘솔
+오류가 P0으로 나왔다.
+
+**Frequency는 원시 발생 건수가 아니라 그 결함이 나타나는 화면 수로 센다.**
+탐색기는 액션마다 원래 화면으로 되돌아가느라 같은 페이지를 수십 번 다시 연다.
+그때마다 같은 오류가 다시 잡히므로 원시 건수는 실사용 빈도가 아니라 크롤러의 이동 횟수를
+반영한다(실측: 404 하나가 후보 332건). `occurrenceCount`는 사실이므로 그대로 기록하되
+점수 계산에는 쓰지 않는다.
 
 ## 19. Issue Deduplication
 

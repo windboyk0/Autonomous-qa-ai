@@ -76,9 +76,37 @@ export const SEVERITY_WEIGHT: Record<Severity, number> = {
   LOW: 1,
 };
 
-export function toPriority(score: number): Priority {
+const PRIORITY_ORDER: Priority[] = ["P0", "P1", "P2", "P3"];
+
+/**
+ * 심각도가 허용하는 우선순위 대역.
+ *
+ * 점수만으로 정하면 순서가 사람의 판단과 어긋난다. 실측 예:
+ * 화면이 아예 열리지 않는 HIGH 결함(1개 화면)이 P3으로, 모든 화면에 반복되는
+ * MEDIUM 콘솔 오류가 P0으로 나왔다. 곱셈식이라 "넓게 퍼짐"이 "심각함"을 덮어버린 것이다.
+ *
+ * 그래서 심각도가 대역을 정하고, 점수는 그 **대역 안에서** 순서를 정한다.
+ */
+const PRIORITY_BAND: Record<Severity, [Priority, Priority]> = {
+  CRITICAL: ["P0", "P0"],
+  HIGH: ["P0", "P1"],
+  MEDIUM: ["P1", "P2"],
+  LOW: ["P2", "P3"],
+};
+
+function fromScore(score: number): Priority {
   if (score >= 60) return "P0";
   if (score >= 25) return "P1";
   if (score >= 8) return "P2";
   return "P3";
+}
+
+export function toPriority(score: number, severity: Severity = "MEDIUM"): Priority {
+  const [best, worst] = PRIORITY_BAND[severity];
+  const raw = PRIORITY_ORDER.indexOf(fromScore(score));
+  const clamped = Math.min(
+    Math.max(raw, PRIORITY_ORDER.indexOf(best)),
+    PRIORITY_ORDER.indexOf(worst),
+  );
+  return PRIORITY_ORDER[clamped]!;
 }

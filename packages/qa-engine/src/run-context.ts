@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import type { Evidence, EvidenceKind } from "@qa/shared";
 import { scrub } from "./emitter.js";
 
-const SUBDIRS = ["screenshots", "dom", "aria", "network", "console", "actions"] as const;
+const SUBDIRS = ["screenshots", "dom", "aria", "network", "console", "visual", "actions"] as const;
 
 /**
  * Run 1회의 출력 상태를 들고 있는 객체.
@@ -84,6 +84,20 @@ export class RunContext {
 
   listEvidences(): readonly Evidence[] {
     return this.evidences;
+  }
+
+  /** 최종 산출물 1: 사람이 읽는 리포트. */
+  writeReport(markdown: string): string {
+    const rel = "report.md";
+    writeFileSync(join(this.runDir, rel), scrub(markdown), "utf8");
+    return rel;
+  }
+
+  /** 최종 산출물 2: 기계가 읽는 이슈 목록. */
+  writeIssues(file: unknown): string {
+    const rel = "issues.json";
+    writeFileSync(join(this.runDir, rel), scrub(JSON.stringify(file, null, 2)), "utf8");
+    return rel;
   }
 
   /** Run 종료 시 증적 색인을 남긴다. Issue의 evidenceId를 파일로 되짚는 데 쓴다. */
