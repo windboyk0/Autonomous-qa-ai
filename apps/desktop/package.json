@@ -8,25 +8,29 @@
   "scripts": {
     "dev": "vite",
     "build": "node scripts/build-main.mjs && vite build",
+    "stage": "node scripts/stage-resources.mjs",
+    "package": "pnpm build && pnpm stage && electron-builder --win --config electron-builder.yml",
     "typecheck": "tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.json --noEmit",
     "start": "electron .",
     "test": "vitest run"
   },
   "dependencies": {
-    "@qa/shared": "workspace:*",
-    "zod": "^3.23.8"
+    "//": "여기 있는 것만 설치본의 node_modules 로 들어간다. @qa/shared·zod 는 esbuild가 main.cjs 에 인라인하므로 넣지 않는다 — 넣으면 electron-builder 가 워크스페이스 심볼릭 링크를 따라가 앱 폴더 밖 파일을 asar 에 넣으려다 실패한다.",
+    "node-sqlite3-wasm": "^0.8.30"
   },
   "devDependencies": {
     "@qa/engine": "workspace:*",
     "@qa/fixture-admin": "workspace:*",
+    "@qa/shared": "workspace:*",
+    "zod": "^3.23.8",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@tailwindcss/vite": "^4.0.0",
     "@vitejs/plugin-react": "^4.3.4",
     "playwright": "^1.49.1",
     "electron": "^33.2.1",
+    "electron-builder": "^25.1.8",
     "esbuild": "^0.24.0",
-    "node-sqlite3-wasm": "^0.8.30",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tailwindcss": "^4.0.0",

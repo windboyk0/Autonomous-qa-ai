@@ -32,11 +32,11 @@ apps/
 
 ## 현재 상태
 
-**Phase 6 완료.** Electron 앱에서 **클릭만으로** 로그인 → 자율 탐색 → 룰 검출 → 쓰기 테스트 → AI 보강 → `report.md` 까지 동작한다.
+**Phase 7 완료 — 전 단계 완주.** Electron 앱에서 **클릭만으로** 로그인 → 자율 탐색 → 룰 검출 → 쓰기 테스트 → AI 보강 → `report.md` 까지 동작한다.
 fixture 대상 14개 화면을 결정적으로 완주하고, **정답지 10건을 전부** 오탐 0건으로 탐지한다.
 쓰기 테스트(Create·Update·Delete)와 테스트 데이터 자동 정리까지 동작한다.
 AI Provider(Ollama·Claude)를 붙였고, **AI가 죽어도 룰 기반 리포트는 그대로** 나온다.
-패키징(설치본)은 Phase 7부터.
+**Windows 설치본(NSIS)까지 완료.** 설치 파일 196MB, 설치 후 Node.js·인터넷 없이 동작한다.
 
 ## 시작하기
 
@@ -115,4 +115,15 @@ pnpm test
 - 삭제·권한변경·발송·일괄처리는 기본 차단. Delete는 `--delete-consent` 없이 실행되지 않는다
 - 수정·삭제 대상은 QA가 만든 `AUTO-QA-*` 데이터로 한정
 - 비밀번호·토큰은 로그·증적·리포트 어디에도 남지 않는다
-- 실제 관리자웹은 Phase 3 이후 Read-only로만 접속한다
+- 실제 관리자웹은 Read-only(기본)로 먼저 접속하고, 쓰기 테스트는 필요할 때만 켠다
+- 등록 화면처럼 보여도 **기존 데이터가 들어 있는 폼은 건드리지 않는다**
+
+## 설치본 만들기
+
+```bash
+pnpm --filter @qa/desktop package
+```
+
+`apps/desktop/release/` 에 NSIS 설치 파일이 생긴다 (약 196MB).
+설치 후에는 **Node.js도 인터넷도 필요 없다** — 풀 크로미움을 동봉한다.
+자세한 내용은 [apps/desktop/README.md](apps/desktop/README.md).

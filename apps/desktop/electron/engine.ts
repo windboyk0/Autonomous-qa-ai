@@ -25,8 +25,10 @@ const here = __dirname;
  */
 export function resolveEnginePath(): string {
   const candidates = [
-    // 패키징된 앱
+    // 패키징된 앱: resources/engine/cli.js
     join(process.resourcesPath ?? "", "engine", "cli.js"),
+    // 개발 중 스테이징 결과 (패키징 전에 확인할 때)
+    resolve(here, "../../resources/engine/cli.js"),
     // 개발: apps/desktop/dist/electron → 저장소 루트로 올라가서 찾는다
     resolve(here, "../../../../packages/qa-engine/dist/cli.js"),
     resolve(here, "../../../packages/qa-engine/dist/cli.js"),
@@ -37,6 +39,24 @@ export function resolveEnginePath(): string {
   throw new Error(
     `QA 엔진을 찾을 수 없습니다. 먼저 \`pnpm build\` 를 실행하세요.\n확인한 경로:\n${candidates.join("\n")}`,
   );
+}
+
+/**
+ * 동봉한 브라우저 위치.
+ *
+ * 설치본에는 풀 크로미움이 `resources/browsers` 에 들어 있다.
+ * 찾으면 `PLAYWRIGHT_BROWSERS_PATH` 로 엔진에 알려주고, 없으면(개발 환경)
+ * 건드리지 않아 개발자 PC의 기본 캐시를 그대로 쓰게 둔다.
+ */
+export function resolveBrowsersPath(): string | null {
+  const candidates = [
+    join(process.resourcesPath ?? "", "browsers"),
+    resolve(here, "../../resources/browsers"),
+  ];
+  for (const path of candidates) {
+    if (path && existsSync(path)) return path;
+  }
+  return null;
 }
 
 /** 설정을 CLI 인자로 바꾼다. 비밀번호는 인자에 넣지 않는다 — 환경변수로 간다. */
@@ -95,23 +115,31 @@ export class EngineProcess {
    * 사용자 PC에 Node.js가 없어도 동작해야 하고(설치본은 Electron만 들어간다),
    * Phase 7 패키징에서도 같은 방식이 그대로 쓰인다.
    */
-  start(config: RunConfig, password: string, handlers: EngineHandlers): void {
+  start(
+    config: RunConfig,
+    password: string,
+    /** 증적(runs/)을 쓸 위치. 설치본에서 프로그램 폴더는 쓰기 금지라 반드시 밖에서 정해 준다. */
+    workDir: string,
+    handlers: EngineHandlers,
+  ): void {
     if (this.running) throw new Error("이미 실행 중인 Run이 있습니다.");
 
     const enginePath = resolveEnginePath();
-    const cwd = resolve(dirname(enginePath), "../../..");
+    const browsersPath = resolveBrowsersPath();
 
     this.stopping = false;
     this.child = spawn(process.execPath, [enginePath, ...toCliArgs(config)], {
-      cwd,
+      cwd: workDir,
       env: {
         ...process.env,
         ELECTRON_RUN_AS_NODE: "1",
         // 비밀번호는 명령행이 아니라 환경변수로 넘긴다.
         // 인자로 넘기면 OS 프로세스 목록에 평문으로 보인다.
         ...(password ? { QA_PASSWORD: password } : {}),
+        // 동봉한 브라우저를 쓰게 한다. 없으면 개발 PC의 기본 캐시를 그대로 쓴다.
+        ...(browsersPath ? { PLAYWRIGHT_BROWSERS_PATH: browsersPath } : {}),
         // 엔진이 INIT_CWD 기준으로 runs/ 를 만든다.
-        INIT_CWD: cwd,
+        INIT_CWD: workDir,
       },
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,

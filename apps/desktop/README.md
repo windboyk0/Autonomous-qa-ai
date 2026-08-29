@@ -47,3 +47,47 @@ Electron 자신을 Node 런타임으로 재사용하기 위해서다.
 - preload에 **자격증명을 읽는 API가 없다**. 저장 여부(`hasPassword`)만 노출한다
 - 비밀번호는 `safeStorage`로 암호화해 BLOB으로만 저장하고, 엔진에는 환경변수로 넘긴다
 - 증적 파일은 main이 읽어 data URL로 넘긴다. 상대경로는 `safeJoin`으로 탈출을 막는다
+
+## 설치본 만들기 (Phase 7)
+
+```bash
+pnpm --filter @qa/desktop package
+```
+
+`build → stage → electron-builder` 순으로 돌아 `release/` 에 NSIS 설치 파일이 생긴다.
+
+| 항목 | 값 |
+|---|---|
+| 설치 파일 | 약 196 MB |
+| 설치 후 | 약 726 MB |
+
+### 무엇이 들어가는가
+
+```
+resources/
+  app.asar        앱 코드 (main.cjs · preload.cjs · 렌더러)
+  engine/         엔진 번들 + playwright  ← asar 밖. 자식 프로세스가 실제 경로로 연다
+    package.json    { "type": "commonjs" } — 없으면 상위 type:module 에 걸려 죽는다
+  browsers/
+    chromium-<rev>  풀 크로미움. 헤드리스·헤드풀 둘 다 이걸로 돈다
+```
+
+**헤드리스 셸(`chromium_headless_shell`)은 넣지 않는다.** `channel: "chromium"` 이면
+풀 크로미움 하나로 두 모드가 다 된다. 셸만 넣으면 헤드풀이 안 되고,
+SSO·2FA처럼 사람이 직접 로그인해야 하는 대상은 검사조차 할 수 없다.
+
+### 사용자 PC에 없어도 되는 것
+
+- **Node.js** — Electron을 `ELECTRON_RUN_AS_NODE` 로 재사용한다
+- **Playwright 브라우저 캐시** — 동봉한 것을 `PLAYWRIGHT_BROWSERS_PATH` 로 가리킨다
+- **인터넷** — 설치 직후 오프라인에서 바로 QA를 시작할 수 있다
+
+### 데이터 위치
+
+`qa.db` 와 증적(`runs/`)은 설치 폴더가 아니라 `%APPDATA%` 아래 userData 로 간다.
+프로그램 폴더는 쓰기 권한이 없을 수 있고 재설치 때 지워진다.
+
+### 아직 안 한 것
+
+- **코드 서명** — 서명하지 않아 첫 실행 시 SmartScreen 경고가 뜬다
+- **아이콘** — Electron 기본 아이콘

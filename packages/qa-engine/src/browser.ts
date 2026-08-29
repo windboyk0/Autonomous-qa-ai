@@ -46,8 +46,23 @@ function installRejectionReporter(): void {
   });
 }
 
+/**
+ * 브라우저 실행 옵션.
+ *
+ * **`channel: "chromium"` 을 명시한다.** 기본값(`headless: true`)은 별도 바이너리인
+ * `chromium_headless_shell` 을 찾는데, 설치본에는 풀 크로미움 하나만 동봉한다.
+ * 셸까지 넣으면 700MB가 되고, 셸만 넣으면 헤드풀이 아예 안 된다 —
+ * SSO·2FA처럼 사람이 직접 로그인해야 하는 대상은 헤드풀 없이는 검사할 수 없다.
+ *
+ * 실측: 풀 크로미움의 헤드리스/헤드풀과 헤드리스 셸은 레이아웃 계측값이 동일하다.
+ * 셸이 주는 것은 용량과 기동 속도뿐이라 버려도 검출 결과가 달라지지 않는다.
+ */
+export function launchOptions(config: RunConfig): { headless: boolean; channel: string } {
+  return { headless: config.headless, channel: "chromium" };
+}
+
 export async function launch(config: RunConfig): Promise<BrowserSession> {
-  const browser = await chromium.launch({ headless: config.headless });
+  const browser = await chromium.launch(launchOptions(config));
 
   const context = await browser.newContext({
     viewport: config.viewport,
@@ -78,15 +93,18 @@ export async function launch(config: RunConfig): Promise<BrowserSession> {
 /** Chromium이 설치되어 있는지 확인한다. 없으면 사용자가 할 일을 알려준다. */
 export async function preflightBrowser(): Promise<{ ok: boolean; remediation: string | null }> {
   try {
-    const b = await chromium.launch({ headless: true });
+    const b = await chromium.launch({ headless: true, channel: "chromium" });
     await b.close();
     return { ok: true, remediation: null };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     if (/Executable doesn't exist|playwright install/i.test(msg)) {
+      const where = process.env.PLAYWRIGHT_BROWSERS_PATH;
       return {
         ok: false,
-        remediation: "Chromium이 설치되지 않았습니다. `pnpm exec playwright install chromium` 을 실행하세요.",
+        remediation: where
+          ? `동봉된 Chromium을 찾지 못했습니다 (${where}). 설치가 손상되었을 수 있으니 다시 설치해 주세요.`
+          : "Chromium이 설치되지 않았습니다. `pnpm exec playwright install chromium` 을 실행하세요.",
       };
     }
     return { ok: false, remediation: `브라우저 기동 실패: ${msg}` };

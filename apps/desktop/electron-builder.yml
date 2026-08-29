@@ -1,0 +1,50 @@
+appId: com.autonomousqa.desktop
+productName: 관리자웹 자율 QA
+copyright: ""
+
+directories:
+  output: release
+  buildResources: build
+
+# asar 안에는 앱 코드만 넣는다.
+# 엔진과 브라우저는 자식 프로세스가 **실제 파일 경로**로 접근해야 하므로
+# extraResources 로 asar 밖에 둔다.
+files:
+  - dist/electron/**
+  - dist/renderer/**
+  - package.json
+  # 번들에서 제외한 네이티브·wasm 모듈만 남긴다.
+  - node_modules/node-sqlite3-wasm/**
+
+extraResources:
+  - from: resources/engine
+    to: engine
+  - from: resources/browsers
+    to: browsers
+
+asar: true
+# 브라우저는 extraResources라 애초에 asar 밖이지만, 혹시 모를 압축을 막는다.
+asarUnpack:
+  - node_modules/node-sqlite3-wasm/**
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  # 서명은 사내 배포 정책이 정해지면 붙인다. 지금은 서명하지 않는다.
+  signAndEditExecutable: false
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: 관리자웹 자율 QA
+  # 풀 크로미움을 동봉하므로 원본이 400MB를 넘는다. 최대 압축으로 설치 파일을 줄인다.
+  differentialPackage: false
+
+compression: maximum
+
+# 사용자 데이터(qa.db, runs/)는 설치 폴더가 아니라 userData 로 간다.
+# 프로그램 폴더는 쓰기 권한이 없을 수 있고, 재설치 때 지워진다.

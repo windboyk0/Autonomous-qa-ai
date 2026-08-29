@@ -30,3 +30,5 @@ Thumbs.db
 
 # Electron / Vite 빌드 산출물
 apps/desktop/dist/
+apps/desktop/resources/
+apps/desktop/release/

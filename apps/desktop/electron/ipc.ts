@@ -208,7 +208,7 @@ export class IpcLayer {
     this.sawFinish = false;
 
     try {
-      this.engine.start(config, password, {
+      this.engine.start(config, password, this.workspaceRoot, {
         onEvent: (event) => this.onEngineEvent(event, config),
         onRawLine: (text) => this.push({ type: "engine-noise", text }),
         onStderr: (text) => this.push({ type: "engine-noise", text }),
