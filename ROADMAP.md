@@ -39,7 +39,28 @@ Electron 창을 거치면 사이클이 느려지고, 오류 원인이 UI / IPC /
 - **Evidence Agent** — `runs/<ts>/`에 screenshot·DOM·ARIA·console·network 기록, 민감헤더 마스킹
 - 비밀번호가 로그·evidence·에러메시지 어디에도 남지 않음을 **테스트로 강제**
 
-**DoD** — fixture 로그인 성공, `runs/` 트리 생성, `grep -r "<비밀번호>" runs/` 결과 0건
+**DoD 결과 — 통과 (테스트 31건)**
+
+| 검증 | 결과 |
+|---|---|
+| fixture 로그인 성공 | 신호 3/3 (URL변경·폼소멸·새쿠키) |
+| `runs/` 트리 생성 | 6개 하위 디렉터리 + `evidence.json` |
+| 증적에 비밀번호 0건 | 통과 (성공·실패 경로 모두) |
+| 증적 색인 깨진 링크 | 0건 |
+| BUG-02(404) / BUG-04(rejection) 포착 | 통과 |
+| 302를 실패로 세지 않음 | 통과 |
+| Cookie / Set-Cookie 마스킹 | 통과 |
+| 잘못된 비밀번호 → FAILED + 실패 화면 증적 | 통과 |
+
+### Phase 1에서 확정된 설계
+
+- **stateKey는 이벤트 발생 시점이 아니라 `drain()` 시점에 찍는다.**
+  클릭 → 이동 → 화면 확정 순서라 이벤트가 터지는 순간에는 어느 화면인지 알 수 없다.
+- **`ok`는 `status < 400`.** Playwright의 `res.ok()`는 3xx를 실패로 보는데 리다이렉트는 정상 동작이다.
+- **`Failed to load resource` 계열 콘솔 오류는 버린다.** 네트워크 항목과 중복되어
+  같은 결함이 Issue 2건으로 세어진다.
+- **증적 색인 저장은 `runQa`의 finally에서.** CLI에 두면 엔진을 직접 호출하는
+  Phase 5의 Electron과 통합 테스트가 색인을 못 받는다.
 
 ## Phase 2 — 자율 탐색 (Read-only)
 

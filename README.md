@@ -18,7 +18,8 @@ Playwright가 자율 탐색하며 증적을 모으고, `report.md` + `issues.jso
 ```
 packages/
   shared/         데이터 계약. RunConfig · PageState · Action · Evidence · Issue · EngineEvent
-  qa-engine/      QA 엔진 CLI. Playwright 탐색 + 검출 + 리포트
+  qa-engine/      QA 엔진. Playwright 탐색 + 검출 + 리포트
+                  cli.ts 인자파싱 · run.ts Run본체 · login.ts · collector.ts · capture.ts
   fixture-admin/  정답을 아는 목 관리자웹. 의도적 버그 10개
 apps/
   desktop/        Electron 셸 (Phase 5)
@@ -26,7 +27,7 @@ apps/
 
 ## 현재 상태
 
-**Phase 0 완료.** 엔진 탐색 로직은 Phase 1부터 붙는다.
+**Phase 1 완료.** 로그인과 증적 수집까지 동작한다. 자율 탐색은 Phase 2부터.
 
 ## 시작하기
 
@@ -35,6 +36,7 @@ apps/
 ```bash
 corepack enable
 pnpm install
+pnpm exec playwright install chromium   # 최초 1회
 pnpm build
 ```
 
@@ -44,12 +46,15 @@ pnpm build
 pnpm dev:fixture     # http://localhost:3100  (admin / admin123!)
 ```
 
-엔진 실행 (현재는 Run 스캐폴딩까지):
+엔진 실행 (로그인 + 착지 화면 증적까지):
 
 ```powershell
 $env:QA_PASSWORD = 'admin123!'
-pnpm qa --url http://localhost:3100 --user admin
+pnpm qa --url http://localhost:3100 --user admin --headless
 ```
+
+결과는 `runs/<yyyyMMdd_HHmmss>/` 에 쌓인다 — `screenshots/` `dom/` `aria/`
+`network/` `console/` `actions/` 와 증적 색인 `evidence.json`.
 
 비밀번호는 `QA_PASSWORD` 환경변수 > `--pass-stdin` > `--pass` 순으로 찾는다.
 `--pass`는 셸 히스토리와 프로세스 목록에 평문으로 남아 경고가 나온다.
@@ -57,7 +62,7 @@ pnpm qa --url http://localhost:3100 --user admin
 테스트:
 
 ```bash
-pnpm --filter @qa/shared test
+pnpm test
 ```
 
 ## 왜 fixture부터인가

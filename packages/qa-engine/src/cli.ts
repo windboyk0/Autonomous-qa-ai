@@ -1,7 +1,7 @@
-import { mkdirSync } from "node:fs";
-import { join, resolve } from "node:path";
 import { RunConfig, redactRunConfig } from "@qa/shared";
 import { emit, log, registerSecret } from "./emitter.js";
+import { RunContext, makeRunId } from "./run-context.js";
+import { runQa } from "./run.js";
 
 /**
  * QA 엔진 CLI 진입점.
@@ -9,8 +9,7 @@ import { emit, log, registerSecret } from "./emitter.js";
  * 사용:
  *   pnpm qa --url http://localhost:3100 --user admin --pass 'admin123!' --provider none
  *
- * Phase 0 시점의 범위: 인자 파싱 → RunConfig 검증 → Run 디렉터리 생성 → 이벤트 스트림 개시.
- * 브라우저 구동(로그인/증적)은 Phase 1에서 붙인다.
+ * 역할은 인자 파싱과 이벤트 스트림 개시까지다. Run 본체는 run.ts 에 있다.
  */
 
 interface RawArgs {
@@ -158,12 +157,6 @@ function buildConfig(args: RawArgs, password: string): RunConfig {
   return parsed.data;
 }
 
-/** Run 디렉터리 이름. 정렬 가능하고 파일시스템에 안전한 형태. */
-function makeRunId(now = new Date()): string {
-  const p = (n: number) => String(n).padStart(2, "0");
-  return `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}_${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
-}
-
 async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   if (args.help === true || args.h === true) {
@@ -187,10 +180,7 @@ async function main(): Promise<void> {
   // pnpm은 스크립트를 패키지 디렉터리에서 실행하므로 process.cwd()를 쓰면
   // 증적이 packages/qa-engine/runs 안에 생긴다. INIT_CWD(사용자가 명령을 친 위치)를 우선한다.
   const baseDir = process.env.INIT_CWD ?? process.cwd();
-  const runDir = resolve(baseDir, config.outDir, runId);
-  for (const sub of ["screenshots", "dom", "aria", "network", "console", "actions"]) {
-    mkdirSync(join(runDir, sub), { recursive: true });
-  }
+  const ctx = new RunContext(runId, config.outDir, baseDir);
 
   emit({
     type: "run:status",
@@ -202,22 +192,19 @@ async function main(): Promise<void> {
 
   // 설정 스냅샷은 반드시 마스킹된 형태로만 남긴다.
   log("info", `설정: ${JSON.stringify(redactRunConfig(config))}`);
-  log("info", `증적 디렉터리: ${runDir}`);
+  log("info", `증적 디렉터리: ${ctx.runDir}`);
 
-  // ── Phase 1에서 여기에 붙는다 ────────────────────────────────────────
-  //   1. Playwright 브라우저 기동 (config.headless / config.viewport)
-  //   2. Login Agent — 로그인 폼 탐지 → 실행 → 성공 판정
-  //   3. Evidence Agent — screenshot/dom/aria/console/network 수집
-  // ────────────────────────────────────────────────────────────────────
-  log("warn", "탐색 엔진은 Phase 1에서 구현됩니다. 현재는 Run 스캐폴딩까지만 동작합니다.");
+  const outcome = await runQa(config, ctx);
 
   emit({
     type: "run:status",
     at: new Date().toISOString(),
     runId,
-    status: "COMPLETED",
-    message: "Phase 0 스캐폴딩 완료",
+    status: outcome.status,
+    message: outcome.message,
   });
+
+  if (outcome.status === "FAILED") process.exitCode = 1;
 }
 
 main().catch((err: unknown) => {

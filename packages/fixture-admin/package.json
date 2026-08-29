@@ -4,6 +4,14 @@
   "private": true,
   "type": "module",
   "description": "정답을 아는 목(mock) 관리자웹. 의도적 버그 10개가 심어져 있다.",
+  "main": "./dist/server.js",
+  "types": "./dist/server.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/server.d.ts",
+      "default": "./dist/server.js"
+    }
+  },
   "scripts": {
     "dev": "tsx watch src/server.ts",
     "start": "tsx src/server.ts",

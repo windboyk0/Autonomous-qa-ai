@@ -2,7 +2,11 @@
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
     "rootDir": "./src",
-    "outDir": "./dist"
+    "outDir": "./dist",
+    // page.evaluate() 콜백은 브라우저에서 실행되므로 DOM 타입이 필요하다.
+    // 대신 Node 코드에서 브라우저 전역(window/document)을 실수로 써도 컴파일이 통과하므로,
+    // 브라우저에서 도는 코드는 evaluate 콜백 안에만 둔다.
+    "lib": ["ES2022", "DOM"]
   },
   "include": ["src/**/*"]
 }

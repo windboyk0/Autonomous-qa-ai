@@ -1,5 +1,5 @@
 import http from "node:http";
-import { URL } from "node:url";
+import { URL, pathToFileURL } from "node:url";
 import {
   users,
   surveys,
@@ -23,7 +23,7 @@ import {
   notFoundPage,
 } from "./pages.js";
 
-const PORT = Number(process.env.FIXTURE_PORT ?? 3100);
+const DEFAULT_PORT = Number(process.env.FIXTURE_PORT ?? 3100);
 const SESSION_COOKIE = "fixture_sid";
 const sessions = new Set<string>();
 
@@ -63,8 +63,13 @@ async function readBody(req: http.IncomingMessage): Promise<string> {
 /** 세션 id는 고정 카운터로 만든다. 난수를 쓰지 않아야 재현이 쉽다. */
 let sessionSeq = 0;
 
-const server = http.createServer(async (req, res) => {
-  const url = new URL(req.url ?? "/", `http://localhost:${PORT}`);
+/**
+ * 서버를 만들되 listen 하지 않는다.
+ * 통합 테스트가 임의 포트로 띄웠다 닫을 수 있어야 하므로 팩토리로 분리한다.
+ */
+export function createFixtureServer(port = DEFAULT_PORT): http.Server {
+  return http.createServer(async (req, res) => {
+  const url = new URL(req.url ?? "/", `http://localhost:${port}`);
   const path = url.pathname;
   const method = req.method ?? "GET";
 
@@ -176,9 +181,37 @@ const server = http.createServer(async (req, res) => {
   if (path === "/settings") return html(res, settingsPage(url.searchParams.get("tab") ?? "general"));
 
   return html(res, notFoundPage(), 404);
-});
+  });
+}
 
-server.listen(PORT, () => {
-  console.log(`[fixture-admin] http://localhost:${PORT}`);
-  console.log(`[fixture-admin] 로그인: ${CREDENTIALS.id} / ${CREDENTIALS.pw}`);
-});
+/** 테스트가 아무 포트나 잡을 수 있게 0을 넘기면 OS가 빈 포트를 준다. */
+export async function startFixtureServer(
+  port = DEFAULT_PORT,
+): Promise<{ server: http.Server; port: number; url: string; close: () => Promise<void> }> {
+  const server = createFixtureServer(port);
+  await new Promise<void>((resolve) => server.listen(port, resolve));
+  const addr = server.address();
+  const actual = typeof addr === "object" && addr ? addr.port : port;
+  return {
+    server,
+    port: actual,
+    url: `http://localhost:${actual}`,
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.closeAllConnections?.();
+        server.close(() => resolve());
+      }),
+  };
+}
+
+// 직접 실행했을 때만 listen 한다. import 시에는 아무 일도 일어나지 않는다.
+// (Windows의 드라이브 문자 때문에 문자열 조합 대신 pathToFileURL을 쓴다)
+const entry = process.argv[1];
+const invokedDirectly = entry !== undefined && import.meta.url === pathToFileURL(entry).href;
+
+if (invokedDirectly) {
+  void startFixtureServer().then(({ url }) => {
+    console.log(`[fixture-admin] ${url}`);
+    console.log(`[fixture-admin] 로그인: ${CREDENTIALS.id} / ${CREDENTIALS.pw}`);
+  });
+}

@@ -36,6 +36,10 @@ importers:
       zod:
         specifier: ^3.23.8
         version: 3.25.76
+    devDependencies:
+      '@qa/fixture-admin':
+        specifier: workspace:*
+        version: link:../fixture-admin
 
   packages/shared:
     dependencies:
