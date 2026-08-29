@@ -70,7 +70,9 @@ CREATE TABLE IF NOT EXISTS qa_runs (
   medium            INTEGER NOT NULL DEFAULT 0,
   low               INTEGER NOT NULL DEFAULT 0,
   ai_status         TEXT NOT NULL DEFAULT 'not_used',
-  summary_json      TEXT
+  summary_json      TEXT,
+  -- 완주하지 못한 Run이 왜 끝났는지. 로그인 실패처럼 정상적인 판정도 여기 들어간다.
+  fail_reason       TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_runs_project ON qa_runs(project_id, started_at DESC);
 
@@ -95,6 +97,21 @@ export class Store {
     this.db = new Database(dbPath);
     this.db.exec("PRAGMA foreign_keys = ON;");
     this.db.exec(SCHEMA);
+    this.migrate();
+  }
+
+  /**
+   * 이미 만들어진 DB에 컬럼을 더한다.
+   * `CREATE TABLE IF NOT EXISTS` 는 기존 테이블을 건드리지 않으므로 따로 필요하다.
+   */
+  private migrate(): void {
+    for (const [table, column, type] of [["qa_runs", "fail_reason", "TEXT"]] as const) {
+      try {
+        this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+      } catch {
+        // 이미 있으면 그대로 둔다.
+      }
+    }
   }
 
   close(): void {
@@ -253,13 +270,42 @@ export class Store {
     }
   }
 
-  /** 엔진이 죽어 결과를 못 받은 Run도 기록은 남긴다. */
-  failRun(runPk: number, status: string): void {
-    this.db.run(`UPDATE qa_runs SET status=?, finished_at=? WHERE id=?`, [
-      status,
-      new Date().toISOString(),
-      runPk,
-    ]);
+  /**
+   * 리포트를 만들지 못하고 끝난 Run.
+   *
+   * **증적은 대개 남아 있다.** 로그인 실패처럼 엔진이 스스로 판단해 멈춘 경우
+   * 실패 화면 스크린샷과 `login.json` 이 그대로 있으므로, 사용자가 열어볼 수 있게
+   * `run_id` 와 `run_dir` 을 반드시 저장한다. 사유도 함께 남긴다.
+   */
+  failRun(
+    runPk: number,
+    status: string,
+    detail: { runId?: string; runDir?: string; reason?: string | null } = {},
+  ): void {
+    this.db.run(
+      `UPDATE qa_runs
+       SET status=?, finished_at=?,
+           run_id = COALESCE(NULLIF(?, ''), run_id),
+           run_dir = COALESCE(NULLIF(?, ''), run_dir),
+           fail_reason = ?
+       WHERE id=?`,
+      [
+        status,
+        new Date().toISOString(),
+        detail.runId ?? "",
+        detail.runDir ?? "",
+        detail.reason ?? null,
+        runPk,
+      ],
+    );
+  }
+
+  /** 완주하지 못한 Run의 사유. 리포트가 없을 때 화면이 대신 보여준다. */
+  getFailReason(runPk: number): string | null {
+    const row = this.db.get("SELECT fail_reason FROM qa_runs WHERE id = ?", [runPk]) as
+      | { fail_reason: string | null }
+      | undefined;
+    return row?.fail_reason ?? null;
   }
 
   listRuns(projectId?: number): RunRow[] {

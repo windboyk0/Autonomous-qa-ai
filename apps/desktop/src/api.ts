@@ -12,7 +12,17 @@ export type RunLifecycle =
   | { type: "started"; runPk: number }
   | { type: "event"; event: EngineEvent }
   | { type: "engine-noise"; text: string }
-  | { type: "exited"; code: number | null; signal: string | null; crashed: boolean };
+  | {
+      type: "exited";
+      code: number | null;
+      signal: string | null;
+      /** 엔진이 아무 말도 없이 죽었는가. 로그인 실패 같은 판정 결과는 크래시가 아니다. */
+      crashed: boolean;
+      /** 엔진이 알린 종료 사유. 크래시면 null. */
+      reason: string | null;
+      /** 증적 폴더. 실패해도 증적은 대개 남아 있다. */
+      runDir: string | null;
+    };
 
 export interface Preflight {
   credentials: { available: boolean; reason: string | null };

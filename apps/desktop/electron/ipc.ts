@@ -28,7 +28,17 @@ export type RunLifecycle =
   | { type: "started"; runPk: number }
   | { type: "event"; event: EngineEvent }
   | { type: "engine-noise"; text: string }
-  | { type: "exited"; code: number | null; signal: string | null; crashed: boolean };
+  | {
+      type: "exited";
+      code: number | null;
+      signal: string | null;
+      /** 엔진이 아무 말도 없이 죽었는가. 로그인 실패 같은 판정 결과는 크래시가 아니다. */
+      crashed: boolean;
+      /** 엔진이 알린 종료 사유. 크래시면 null. */
+      reason: string | null;
+      /** 증적 폴더. 실패해도 증적은 대개 남아 있다. */
+      runDir: string | null;
+    };
 
 export class IpcLayer {
   private readonly engine = new EngineProcess();
@@ -36,8 +46,17 @@ export class IpcLayer {
   private currentRunDir: string | null = null;
   private lastSummary: RunSummary | null = null;
   private lastIssues: Issue[] = [];
-  /** 엔진이 `run:finished`를 보냈는가. 안 보내고 죽었으면 크래시로 본다. */
+  private currentRunId: string | null = null;
+  /** 엔진이 `run:finished`를 보냈는가. */
   private sawFinish = false;
+  /**
+   * 엔진이 마지막으로 알린 종료 상태와 사유.
+   *
+   * **로그인 실패는 크래시가 아니다.** 엔진이 스스로 판단해 `FAILED` 를 보내고
+   * 증적까지 남긴 뒤 종료 코드 1로 끝낸다. 이걸 "비정상 종료"로 표시하면
+   * 사용자는 프로그램이 깨진 줄 알고 진짜 원인(로그인 실패)을 놓친다.
+   */
+  private lastStatus: { status: string; message: string } | null = null;
 
   constructor(
     private readonly store: Store,
@@ -206,6 +225,8 @@ export class IpcLayer {
     this.lastSummary = null;
     this.lastIssues = [];
     this.sawFinish = false;
+    this.lastStatus = null;
+    this.currentRunId = null;
 
     try {
       this.engine.start(config, password, this.workspaceRoot, {
@@ -226,8 +247,12 @@ export class IpcLayer {
   }
 
   private onEngineEvent(event: EngineEvent, config: RunConfig): void {
-    if (event.type === "run:status" && event.status === "RUNNING") {
+    if (event.type === "run:status") {
+      this.currentRunId = event.runId;
       this.currentRunDir = join(config.outDir, event.runId);
+      if (event.status !== "RUNNING" && event.status !== "PENDING") {
+        this.lastStatus = { status: event.status, message: event.message };
+      }
     }
     if (event.type === "run:finished") {
       this.sawFinish = true;
@@ -248,14 +273,28 @@ export class IpcLayer {
    */
   private onExit(code: number | null, signal: string | null): void {
     const runPk = this.currentRunPk;
-    const crashed = !this.sawFinish;
+
+    /**
+     * 크래시는 **엔진이 아무 말도 없이 죽은 경우만**이다.
+     * `run:finished` 를 받았거나, 엔진이 스스로 FAILED/STOPPED 를 알렸다면
+     * 그건 판정 결과이지 프로그램 오류가 아니다.
+     */
+    const crashed = !this.sawFinish && this.lastStatus === null;
+    const reason = this.lastStatus?.message ?? null;
 
     try {
       if (runPk !== null) {
         if (this.lastSummary) {
           this.store.finishRun(runPk, this.lastSummary, this.currentRunDir ?? "", this.lastIssues);
         } else {
-          this.store.failRun(runPk, crashed ? "FAILED" : "STOPPED");
+          this.store.failRun(runPk, this.lastStatus?.status ?? "FAILED", {
+            runId: this.currentRunId ?? undefined,
+            // 증적은 남아 있다. 폴더를 열 수 있어야 원인을 확인한다.
+            runDir: this.currentRunDir ?? undefined,
+            reason:
+              reason ??
+              `엔진이 아무 결과도 남기지 못하고 종료했습니다 (종료 코드 ${code ?? "?"}${signal ? `, ${signal}` : ""}).`,
+          });
         }
       }
     } catch {
@@ -263,7 +302,14 @@ export class IpcLayer {
     }
 
     this.currentRunPk = null;
-    this.push({ type: "exited", code, signal, crashed });
+    this.push({
+      type: "exited",
+      code,
+      signal,
+      crashed,
+      reason,
+      runDir: this.currentRunDir,
+    });
   }
 
   dispose(): void {

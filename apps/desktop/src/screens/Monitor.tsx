@@ -21,6 +21,7 @@ export function Monitor() {
     aiDetail,
     crashed,
     lastError,
+    lastRunDir,
     setPaused,
     go,
     selectedRunPk,
@@ -82,6 +83,14 @@ export function Monitor() {
           >
             중단
           </button>
+          {!running && lastRunDir && (
+            <button
+              className="btn-ghost"
+              onClick={() => void qa().runs.openFolder(lastRunDir)}
+            >
+              증적 폴더
+            </button>
+          )}
           {!running && (
             <button className="btn-primary" data-testid="goto-report" onClick={() => go("report")}>
               리포트 열기
@@ -90,12 +99,35 @@ export function Monitor() {
         </div>
       </div>
 
+      {/*
+        크래시와 실패는 다른 것이다.
+        - 크래시: 엔진이 아무 말 없이 죽음 → 프로그램 문제일 수 있다
+        - 실패: 로그인 실패처럼 엔진이 판정한 결과 → 대상 시스템이나 설정 문제다
+        섞어서 "비정상 종료"라고 하면 사용자가 진짜 원인을 놓친다.
+      */}
       {crashed && (
         <div className="alert-error mb-4" data-testid="crash-banner">
           <b>엔진이 비정상 종료했습니다.</b> 프로그램은 계속 사용할 수 있습니다. {lastError}
         </div>
       )}
-      {lastError && !crashed && <div className="alert-error mb-4">{lastError}</div>}
+      {lastError && !crashed && (
+        <div className="alert-warn mb-4" data-testid="fail-banner">
+          <b>QA를 끝까지 진행하지 못했습니다.</b>
+          <div className="mt-1">{lastError}</div>
+          {lastRunDir && (
+            <div className="mt-2">
+              여기까지 모은 증적(스크린샷·DOM·네트워크)은 남아 있습니다.{" "}
+              <button
+                className="btn-ghost"
+                data-testid="open-evidence-folder"
+                onClick={() => void qa().runs.openFolder(lastRunDir)}
+              >
+                증적 폴더 열기
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="grid grid-cols-3 gap-4">
         <div className="col-span-1 space-y-4">

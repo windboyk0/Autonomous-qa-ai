@@ -40,7 +40,12 @@ export function App() {
           noteNoise(message.text);
           break;
         case "exited":
-          endRun(message.crashed, message.code);
+          endRun({
+            crashed: message.crashed,
+            code: message.code,
+            reason: message.reason,
+            runDir: message.runDir,
+          });
           void (async () => {
             const rows = await qa().runs.list();
             setRuns(rows);

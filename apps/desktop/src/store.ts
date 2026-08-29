@@ -74,9 +74,11 @@ interface State {
   visitedScreens: Array<{ name: string; screenshotPath: string | null }>;
   liveIssues: Issue[];
   aiDetail: string | null;
-  /** 엔진이 결과 없이 죽었는가. 화면에 크게 알려야 한다. */
+  /** 엔진이 **아무 말도 없이** 죽었는가. 로그인 실패 같은 판정 결과는 여기 해당하지 않는다. */
   crashed: boolean;
   lastError: string | null;
+  /** 마지막 Run의 증적 폴더. 실패해도 증적은 대개 남아 있다. */
+  lastRunDir: string | null;
 
   /** 결과 조회 */
   summary: RunSummary | null;
@@ -96,7 +98,12 @@ interface State {
   beginRun: () => void;
   applyEvent: (event: EngineEvent) => void;
   noteNoise: (text: string) => void;
-  endRun: (crashed: boolean, code: number | null) => void;
+  endRun: (input: {
+    crashed: boolean;
+    code: number | null;
+    reason: string | null;
+    runDir: string | null;
+  }) => void;
   setPaused: (paused: boolean) => void;
   setError: (message: string | null) => void;
 }
@@ -128,6 +135,7 @@ export const useStore = create<State>((set) => ({
   aiDetail: null,
   crashed: false,
   lastError: null,
+  lastRunDir: null,
 
   summary: null,
   issues: [],
@@ -151,6 +159,7 @@ export const useStore = create<State>((set) => ({
       paused: false,
       crashed: false,
       lastError: null,
+      lastRunDir: null,
       runStatus: "RUNNING",
       progress: emptyProgress,
       logs: [],
@@ -211,14 +220,22 @@ export const useStore = create<State>((set) => ({
       ],
     })),
 
-  endRun: (crashed, code) =>
+  /**
+   * Run 종료.
+   *
+   * **크래시와 실패를 섞지 않는다.** 로그인 실패처럼 엔진이 스스로 판단해 멈춘 것은
+   * 정상적인 판정 결과이고 증적도 남아 있다. 그걸 "비정상 종료"로 표시하면
+   * 사용자는 프로그램이 깨진 줄 알고 진짜 원인을 놓친다.
+   */
+  endRun: ({ crashed, code, reason, runDir }) =>
     set((state) => ({
       running: false,
       paused: false,
       crashed,
+      lastRunDir: runDir ?? state.lastRunDir,
       runStatus: crashed ? "FAILED" : state.runStatus === "RUNNING" ? "STOPPED" : state.runStatus,
       lastError: crashed
-        ? `엔진이 결과를 남기지 못하고 종료했습니다 (종료 코드 ${code ?? "?"}). 아래 로그를 확인하세요.`
-        : state.lastError,
+        ? `엔진이 아무 결과도 남기지 못하고 종료했습니다 (종료 코드 ${code ?? "?"}). 아래 로그를 확인하세요.`
+        : (reason ?? state.lastError),
     })),
 }));

@@ -181,6 +181,51 @@ describe("Phase 5 — 클릭만으로 QA 실행", () => {
   });
 });
 
+describe("Phase 5 — 실패와 크래시를 구분한다", () => {
+  /**
+   * 로그인 실패는 **판정 결과이지 프로그램 오류가 아니다.**
+   * 엔진이 스스로 FAILED 를 알리고 실패 화면 증적까지 남긴 뒤 종료 코드 1로 끝난다.
+   * 이걸 "비정상 종료"로 표시하면 사용자는 프로그램이 깨진 줄 알고
+   * 진짜 원인(로그인 실패)을 놓친다.
+   */
+  it("로그인이 실패하면 크래시가 아니라 사유를 보여준다", async () => {
+    await page.click('[data-testid="nav-projects"]');
+    await page.click('[data-testid="project-new"]');
+    await page.waitForSelector('[data-testid="cfg-url"]');
+
+    await page.fill('[data-testid="cfg-name"]', "로그인실패");
+    await page.fill('[data-testid="cfg-url"]', fixture.url);
+    await page.fill('[data-testid="cfg-user"]', "admin");
+    await page.fill('[data-testid="cfg-pass"]', "틀린비밀번호");
+    await page.fill('[data-testid="cfg-maxscreens"]', "1");
+    await page.click('[data-testid="start-qa"]');
+
+    await page.waitForFunction(
+      () => document.querySelector('[data-testid="btn-stop"]')?.hasAttribute("disabled") === true,
+      undefined,
+      { timeout: 180_000 },
+    );
+
+    // 크래시 배너가 아니라 실패 배너가 떠야 한다.
+    expect(await page.locator('[data-testid="crash-banner"]').count()).toBe(0);
+    expect(await page.locator('[data-testid="fail-banner"]').count()).toBe(1);
+
+    // 화면에 원인이 그대로 보여야 한다.
+    const banner = (await page.textContent('[data-testid="fail-banner"]')) ?? "";
+    expect(banner).toContain("로그인 실패");
+
+    // 증적은 남아 있고 폴더를 열 수 있어야 한다.
+    expect(await page.locator('[data-testid="open-evidence-folder"]').count()).toBe(1);
+  }, 240_000);
+
+  it("실패한 Run도 증적 폴더 경로와 함께 History에 남는다", async () => {
+    await page.click('[data-testid="nav-history"]');
+    await page.waitForSelector('[data-testid="history-table"]');
+    const rows = await page.locator('[data-testid="history-table"] tbody tr').count();
+    expect(rows).toBeGreaterThan(0);
+  });
+});
+
 describe("Phase 5 — 엔진 크래시 격리", () => {
   /**
    * 엔진 프로세스를 강제로 죽여도 Electron은 살아 있어야 한다 (CLAUDE.md §24).
