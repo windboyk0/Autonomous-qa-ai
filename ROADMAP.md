@@ -27,7 +27,7 @@ Electron 창을 거치면 사이클이 느려지고, 오류 원인이 UI / IPC /
 - [x] pnpm 모노레포 스캐폴딩
 - [x] `packages/shared` 데이터 계약 (zod)
 - [x] `packages/fixture-admin` + 의도적 버그 10개 정답지
-- [ ] `pnpm install` / `pnpm build` 통과 **(Node.js 설치 필요)**
+- [x] `pnpm install` / `pnpm build` / `pnpm test` 통과 (Node.js 24.19.0)
 
 **DoD** — `pnpm dev:fixture` → `localhost:3100` 목 관리자웹 동작, `pnpm build` 타입 통과,
 `packages/fixture-admin/KNOWN_BUGS.md`에 버그 10개 정답지 존재

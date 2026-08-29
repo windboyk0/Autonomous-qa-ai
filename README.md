@@ -46,8 +46,18 @@ pnpm dev:fixture     # http://localhost:3100  (admin / admin123!)
 
 엔진 실행 (현재는 Run 스캐폴딩까지):
 
+```powershell
+$env:QA_PASSWORD = 'admin123!'
+pnpm qa --url http://localhost:3100 --user admin
+```
+
+비밀번호는 `QA_PASSWORD` 환경변수 > `--pass-stdin` > `--pass` 순으로 찾는다.
+`--pass`는 셸 히스토리와 프로세스 목록에 평문으로 남아 경고가 나온다.
+
+테스트:
+
 ```bash
-pnpm qa --url http://localhost:3100 --user admin --pass 'admin123!'
+pnpm --filter @qa/shared test
 ```
 
 ## 왜 fixture부터인가

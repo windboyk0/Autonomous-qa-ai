@@ -37,6 +37,17 @@ crud.delete === true && crud.deleteConsent === true && 대상이 AUTO-QA-* 데�
 CLI에서 `--delete`만 주면 거부하고 종료한다 (`--delete-consent` 필수).
 
 ## 자격증명
+
+### 전달 경로 (우선순위)
+1. `QA_PASSWORD` 환경변수 — 권장. Electron이 자식 프로세스를 띄울 때 쓰는 경로
+2. `--pass-stdin` — stdin 첫 줄
+3. `--pass <PW>` — **비권장.** 셸 히스토리와 OS 프로세스 목록에 평문으로 남는다.
+   엔진이 아무리 출력을 마스킹해도 이 경로는 막을 수 없으므로 사용 시 경고를 낸다.
+
+명령행 인자는 `ps` / 작업 관리자에서 같은 PC의 다른 프로세스에 그대로 보인다.
+Phase 5의 Electron은 반드시 env로 넘긴다.
+
+### 저장
 - 저장은 Electron `safeStorage` 또는 OS Credential Store. **SQLite 평문 저장 금지**
 - 메모리에서는 `RunConfig.login.password`에만 존재하고, 나가는 모든 경로에서 `scrub()`
 - 직렬화가 필요한 모든 지점에서 `redactRunConfig()`

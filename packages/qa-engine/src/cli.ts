@@ -42,8 +42,12 @@ const USAGE = `
 
 로그인
   --user <ID>              로그인 아이디
-  --pass <PW>              로그인 비밀번호 (로그·증적 어디에도 기록되지 않음)
   --no-login               로그인 없이 탐색
+
+  비밀번호는 아래 중 하나로 전달한다 (위에서부터 우선):
+    QA_PASSWORD 환경변수    권장. Electron이 자식 프로세스를 띄울 때 쓰는 경로
+    --pass-stdin           stdin 첫 줄을 비밀번호로 읽는다
+    --pass <PW>            비권장. 셸 히스토리와 프로세스 목록에 그대로 남는다
 
 AI
   --provider <none|ollama|claude>   기본 none
@@ -61,7 +65,45 @@ AI
   --start-path <PATH>      로그인 후 시작 경로
 `.trim();
 
-function buildConfig(args: RawArgs): RunConfig {
+/** stdin 첫 줄을 읽는다. 파이프가 없으면 빈 문자열. */
+async function readPasswordFromStdin(): Promise<string> {
+  if (process.stdin.isTTY) return "";
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(chunk as Buffer);
+    if (Buffer.concat(chunks).includes(0x0a)) break;
+  }
+  return Buffer.concat(chunks).toString("utf8").split(/\r?\n/)[0] ?? "";
+}
+
+/**
+ * 비밀번호 출처를 정한다.
+ *
+ * `--pass`는 편의를 위해 남겨두지만 셸 히스토리와 OS 프로세스 목록에 평문으로 남는다.
+ * 엔진이 아무리 마스킹해도 이 경로는 막을 수 없으므로 사용 시 경고한다.
+ * Electron(Phase 5)은 자식 프로세스 env로 QA_PASSWORD를 넘긴다.
+ */
+async function resolvePassword(args: RawArgs): Promise<{ password: string; warning: string | null }> {
+  const fromEnv = process.env.QA_PASSWORD;
+  if (fromEnv) return { password: fromEnv, warning: null };
+
+  if (args["pass-stdin"] === true) {
+    return { password: await readPasswordFromStdin(), warning: null };
+  }
+
+  if (typeof args.pass === "string") {
+    return {
+      password: args.pass,
+      warning:
+        "--pass 로 넘긴 비밀번호는 셸 히스토리와 프로세스 목록에 평문으로 남습니다. " +
+        "QA_PASSWORD 환경변수 또는 --pass-stdin 을 사용하세요.",
+    };
+  }
+
+  return { password: "", warning: null };
+}
+
+function buildConfig(args: RawArgs, password: string): RunConfig {
   const url = typeof args.url === "string" ? args.url : "";
   if (!url) {
     process.stderr.write(USAGE + "\n");
@@ -82,7 +124,7 @@ function buildConfig(args: RawArgs): RunConfig {
     login: {
       enabled: args["no-login"] !== true,
       username: str("user"),
-      password: str("pass"),
+      password,
     },
     crud: {
       create: args.create === true,
@@ -129,10 +171,12 @@ async function main(): Promise<void> {
     return;
   }
 
-  const config = buildConfig(args);
+  const { password, warning } = await resolvePassword(args);
+  const config = buildConfig(args, password);
 
   // 비밀번호는 이 시점 이후 모든 출력에서 자동 마스킹된다.
   if (config.login.password) registerSecret(config.login.password);
+  if (warning) log("warn", warning);
 
   if (config.crud.delete && !config.crud.deleteConsent) {
     process.stderr.write("--delete 는 --delete-consent 없이 사용할 수 없습니다.\n");
@@ -140,7 +184,10 @@ async function main(): Promise<void> {
   }
 
   const runId = makeRunId();
-  const runDir = resolve(process.cwd(), config.outDir, runId);
+  // pnpm은 스크립트를 패키지 디렉터리에서 실행하므로 process.cwd()를 쓰면
+  // 증적이 packages/qa-engine/runs 안에 생긴다. INIT_CWD(사용자가 명령을 친 위치)를 우선한다.
+  const baseDir = process.env.INIT_CWD ?? process.cwd();
+  const runDir = resolve(baseDir, config.outDir, runId);
   for (const sub of ["screenshots", "dom", "aria", "network", "console", "actions"]) {
     mkdirSync(join(runDir, sub), { recursive: true });
   }

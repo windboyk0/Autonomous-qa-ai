@@ -48,17 +48,22 @@ export type ExploreBudget = z.infer<typeof ExploreBudget>;
 export const SafetyPolicy = z.object({
   /** 자동 실행을 허용할 최대 위험도. DANGEROUS는 사용자가 명시적으로 올리지 않는 한 금지. */
   maxAutoRisk: RiskLevel.default("SAFE"),
-  /** 이 정규식에 걸리는 라벨/URL은 위험도와 무관하게 절대 클릭하지 않는다. */
+  /**
+   * 이 정규식에 걸리는 라벨/URL은 위험도와 무관하게 절대 클릭하지 않는다.
+   * **정규식 소스 문자열이다.** `new RegExp(p, "i")`로 컴파일되므로
+   * 백슬래시를 두 번 써야 한다(`"\\s"`). 한 번만 쓰면 JS가 `\s`를 `s`로 삼켜
+   * 패턴이 조용히 무력화된다. run-config.test.ts가 이를 막는다.
+   */
   denyLabelPatterns: z
     .array(z.string())
     .default([
       "로그아웃",
       "logout",
-      "sign\s*out",
+      "sign\\s*out",
       "탈퇴",
       "초기화",
       "일괄",
-      "전체\s*삭제",
+      "전체\\s*삭제",
       "발송",
       "전송",
       "승인",
@@ -104,7 +109,25 @@ export type AiProviderConfig = z.infer<typeof AiProviderConfig>;
 
 export const RunConfig = z.object({
   projectName: z.string().min(1),
-  targetUrl: z.string().url(),
+  /**
+   * zod의 `.url()`만으로는 부족하다. `localhost:3100`은 스킴이 `localhost:`인
+   * 유효한 URL로 파싱되어 통과해버리는데, Playwright는 이 주소로 이동할 수 없다.
+   * 사용자가 가장 흔히 치는 실수라 http/https를 명시적으로 강제한다.
+   */
+  targetUrl: z
+    .string()
+    .url()
+    .refine(
+      (v) => {
+        // .url() 이 실패한 값에도 이 refine이 호출되므로 스스로 방어해야 한다.
+        try {
+          return /^https?:$/.test(new URL(v).protocol);
+        } catch {
+          return false;
+        }
+      },
+      { message: "http:// 또는 https:// 로 시작해야 합니다" },
+    ),
   startPath: z.string().default("/"),
   headless: z.boolean().default(false),
   viewport: z
