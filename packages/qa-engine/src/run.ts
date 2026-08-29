@@ -1,6 +1,9 @@
 import {
   redactRunConfig,
   type ActionResult,
+  type Evidence,
+  type AiProvider,
+  type AiProviderConfig,
   type Issue,
   type IssuesFile,
   type RunConfig,
@@ -16,10 +19,22 @@ import type { RunContext } from "./run-context.js";
 import { Explorer, makeStartPlan, type ExploreResult } from "./explorer.js";
 import { judge } from "./judge.js";
 import { renderReport } from "./report.js";
+import { AiGuard, createProvider, enrich, passthrough, type EnrichResult } from "./ai/index.js";
 
 export interface RunOutcome {
   status: RunStatus;
   message: string;
+}
+
+export interface RunOptions {
+  /**
+   * Provider 주입 지점.
+   *
+   * 없으면 `config.ai.kind`로 만든다. 테스트가 실패하는 Provider를 꽂아
+   * "AI가 죽어도 리포트는 나온다"를 검증하는 데 쓰고, Phase 5의 Electron이
+   * 자기 Provider를 넘길 수도 있다.
+   */
+  createProvider?: (config: AiProviderConfig) => AiProvider;
 }
 
 /**
@@ -56,12 +71,86 @@ function unverifiedAreas(results: ActionResult[], config: RunConfig): string[] {
   return out;
 }
 
+/**
+ * AI 보강을 시도한다. **어떤 실패도 위로 던지지 않는다.**
+ *
+ * Provider가 없거나, 헬스체크에서 떨어지거나, 호출이 전부 실패해도
+ * 입력으로 받은 룰 기반 Issue를 그대로 돌려준다. 이것이 Phase 4의 존재 이유다.
+ */
+async function enrichWithAi(input: {
+  config: RunConfig;
+  issues: Issue[];
+  explored: ExploreResult;
+  evidences: readonly Evidence[];
+  makeProvider: (config: AiProviderConfig) => AiProvider;
+}): Promise<EnrichResult> {
+  const { config, issues, explored, evidences } = input;
+  if (config.ai.kind === "none") return passthrough(issues);
+
+  const provider = input.makeProvider(config.ai);
+
+  const status = await new AiGuard(config.ai.timeoutMs)
+    .run("healthCheck", () => provider.healthCheck())
+    .catch(() => null);
+
+  if (!status?.available) {
+    const detail = status?.detail ?? "Provider 상태를 확인할 수 없습니다.";
+    log("warn", `AI Provider를 사용할 수 없습니다: ${detail}`);
+    if (status?.remediation) log("warn", `조치: ${status.remediation}`);
+    emit({ type: "ai:status", at: new Date().toISOString(), available: false, detail });
+    return {
+      ...passthrough(issues),
+      status: "failed",
+      failureReason: status?.remediation ? `${detail} (${status.remediation})` : detail,
+    };
+  }
+
+  log("info", status.detail);
+  emit({ type: "ai:status", at: new Date().toISOString(), available: true, detail: status.detail });
+
+  const pages = explored.graph.nodes.map((n) => ({
+    screenName: n.screenName,
+    pathTemplate: n.signals.pathTemplate,
+    visibleText: n.signals.heading,
+    domOutline: n.signals.navLabels.join(", "),
+  }));
+
+  // 요약 프롬프트에 넣을 임시 summary. 최종 summary는 보강 결과로 다시 만든다.
+  const draftSummary = buildSummary({
+    runId: "draft",
+    config,
+    startedAt: new Date(),
+    explored,
+    issues,
+    ai: null,
+  });
+
+  try {
+    return await enrich({
+      provider,
+      config: config.ai,
+      status,
+      issues,
+      summary: draftSummary,
+      evidences,
+      actionResults: explored.actionResults,
+      pages,
+    });
+  } catch (err) {
+    // enrich 내부는 전부 guard를 통과하지만, 만약을 대비해 한 겹 더 둔다.
+    const reason = err instanceof Error ? err.message : String(err);
+    log("error", `AI 보강이 예기치 않게 실패했습니다. 룰 결과로 진행합니다: ${reason}`);
+    return { ...passthrough(issues), status: "failed", failureReason: reason };
+  }
+}
+
 function buildSummary(input: {
   runId: string;
   config: RunConfig;
   startedAt: Date;
   explored: ExploreResult;
   issues: Issue[];
+  ai: EnrichResult | null;
 }): RunSummary {
   const { runId, config, startedAt, explored, issues } = input;
   const finishedAt = new Date();
@@ -99,8 +188,8 @@ function buildSummary(input: {
           : "설정에서 꺼져 있습니다.",
       };
     }),
-    aiStatus: config.ai.kind === "none" ? "not_used" : "not_used",
-    aiFailureReason: null,
+    aiStatus: input.ai?.status ?? "not_used",
+    aiFailureReason: input.ai?.failureReason ?? null,
     explorationLimits: explored.limits,
     unverifiedAreas: unverifiedAreas(explored.actionResults, config),
   };
@@ -114,7 +203,11 @@ function buildSummary(input: {
  * CLI에서 분리해 둔 이유는 통합 테스트가 프로세스를 띄우지 않고
  * 이 함수만 직접 호출할 수 있게 하기 위해서다.
  */
-export async function runQa(config: RunConfig, ctx: RunContext): Promise<RunOutcome> {
+export async function runQa(
+  config: RunConfig,
+  ctx: RunContext,
+  options: RunOptions = {},
+): Promise<RunOutcome> {
   const startedAt = new Date();
   const pre = await preflightBrowser();
   if (!pre.ok) {
@@ -186,13 +279,24 @@ export async function runQa(config: RunConfig, ctx: RunContext): Promise<RunOutc
     );
     for (const limit of explored.limits) log("warn", `탐색 제한: ${limit}`);
 
-    // ── Issue 확정 ────────────────────────────────────────────────────
+    // ── Issue 확정 (룰) ───────────────────────────────────────────────
     const judged = judge(explored.candidates, explored.graph);
     log(
       "info",
       `Issue 확정: 후보 ${judged.mergedFrom}건 → Issue ${judged.issues.length}건`,
     );
-    for (const issue of judged.issues) {
+
+    // ── AI 보강 ───────────────────────────────────────────────────────
+    // 탐색이 끝난 뒤에만 돈다. 여기서 무슨 일이 나도 위의 judged.issues는 그대로다.
+    const enriched = await enrichWithAi({
+      config,
+      issues: judged.issues,
+      explored,
+      evidences: ctx.listEvidences(),
+      makeProvider: options.createProvider ?? createProvider,
+    });
+
+    for (const issue of enriched.issues) {
       emit({ type: "issue:found", at: new Date().toISOString(), issue });
     }
 
@@ -202,13 +306,21 @@ export async function runQa(config: RunConfig, ctx: RunContext): Promise<RunOutc
       config,
       startedAt,
       explored,
-      issues: judged.issues,
+      issues: enriched.issues,
+      ai: enriched,
     });
 
     const reportPath = ctx.writeReport(
-      renderReport({ summary, issues: judged.issues, evidences: ctx.listEvidences() }),
+      renderReport({
+        summary,
+        issues: enriched.issues,
+        evidences: ctx.listEvidences(),
+        aiSummary: enriched.summaryText,
+        missingFeatures: enriched.missingFeatures,
+        suspectedFalsePositives: enriched.suspectedFalsePositives,
+      }),
     );
-    const issuesPath = ctx.writeIssues({ schemaVersion: 1, summary, issues: judged.issues });
+    const issuesPath = ctx.writeIssues({ schemaVersion: 1, summary, issues: enriched.issues });
 
     emit({
       type: "run:finished",

@@ -23,19 +23,42 @@ function fmtDuration(ms: number): string {
   return s < 60 ? `${s}초` : `${Math.floor(s / 60)}분 ${s % 60}초`;
 }
 
+/** AI 보강이 description 뒤에 덧붙이는 문단의 표식. enrich.ts와 짝을 이룬다. */
+const AI_MARKER = "[AI 원인 분석]";
+
+/**
+ * 설명을 관측 사실과 AI 분석으로 나눈다.
+ *
+ * 스택 트레이스가 통째로 리포트에 쏟아지면 읽을 수 없으므로 관측 사실은
+ * 첫 문단만 쓴다. 다만 그 뒤에 붙은 AI 분석까지 잘라버리면 AI를 켠 의미가 없다.
+ */
+function splitDescription(description: string): { observed: string; ai: string | null } {
+  const index = description.indexOf(AI_MARKER);
+  if (index === -1) {
+    return { observed: description.split("\n")[0] ?? "", ai: null };
+  }
+  return {
+    observed: description.slice(0, index).split("\n")[0] ?? "",
+    ai: description.slice(index + AI_MARKER.length).trim(),
+  };
+}
+
 function issueSection(issue: Issue, evidences: readonly Evidence[]): string {
   const links = issue.evidenceIds
     .map((id) => evidences.find((e) => e.id === id))
     .filter((e): e is Evidence => e !== undefined && e.path !== null)
     .map((e) => `[${e.path}](${e.path})`);
 
+  const { observed, ai } = splitDescription(issue.description);
+
   const lines = [
     `### ${issue.id} · ${SEVERITY_LABEL[issue.severity]} · ${issue.priority} · ${issue.title}`,
     "",
     `**화면** ${issue.screens.join(", ")}`,
     "",
-    `**설명** ${issue.description.split("\n")[0]}`,
+    `**설명** ${observed}`,
     "",
+    ...(ai ? [`**AI 원인 분석** ${ai}`, ""] : []),
     `**영향** ${issue.impact}`,
     "",
     "**재현**",
@@ -57,6 +80,10 @@ export function renderReport(input: {
   evidences: readonly Evidence[];
   /** AI가 만든 요약. 없으면 룰 기반 문장을 쓴다. */
   aiSummary?: string | null;
+  /** AI가 제안한 기능 누락 후보 (§13). */
+  missingFeatures?: string[];
+  /** AI가 오탐으로 본 Issue. 지우지 않고 말미에 표시만 한다. */
+  suspectedFalsePositives?: Array<{ id: string; title: string }>;
 }): string {
   const { summary, issues, evidences } = input;
   const cfg = summary.config;
@@ -190,13 +217,21 @@ export function renderReport(input: {
   }
 
   // ── 13. 기능 누락 후보 ──────────────────────────────────────────────
-  push(
-    "## 13. 기능 누락 후보",
-    "",
-    summary.aiStatus === "ok"
-      ? "AI 분석 결과가 없습니다."
-      : "AI 분석을 사용하지 않아 기능 누락 후보는 판정하지 않았습니다. (Phase 4)",
-  );
+  const missing = input.missingFeatures ?? [];
+  push("## 13. 기능 누락 후보");
+  if (missing.length > 0) {
+    push(
+      "AI가 관리자 업무 흐름을 기준으로 제안한 후보입니다. **검증된 결함이 아닙니다.**",
+      "",
+      ...missing.map((m) => `- ${m}`),
+    );
+  } else if (summary.aiStatus === "not_used") {
+    push("AI Provider를 사용하지 않아 판정하지 않았습니다.");
+  } else if (summary.aiStatus === "failed") {
+    push(`AI 분석을 사용할 수 없어 판정하지 않았습니다. (${summary.aiFailureReason ?? "사유 미상"})`);
+  } else {
+    push("AI가 제안한 기능 누락 후보가 없습니다.");
+  }
 
   // ── 14. 우선순위 ────────────────────────────────────────────────────
   push("## 14. 우선순위");
@@ -243,6 +278,20 @@ export function renderReport(input: {
     push("- 없음");
   } else {
     push(...summary.unverifiedAreas.map((a) => `- ${a}`));
+  }
+
+  // ── 부록: AI가 오탐으로 본 항목 ─────────────────────────────────────
+  //   지우지 않고 남긴다. AI가 틀렸을 때 사람이 되짚을 수 있어야 한다.
+  const fp = input.suspectedFalsePositives ?? [];
+  if (fp.length > 0) {
+    push(
+      "## 부록. AI가 오탐으로 본 항목",
+      "",
+      "아래 Issue는 AI가 실제 결함이 아니라고 판단했습니다.",
+      "**목록에서 지우지 않았습니다.** AI 판단이 틀릴 수 있으므로 직접 확인하세요.",
+      "",
+      ...fp.map((f) => `- ${f.id} ${f.title}`),
+    );
   }
 
   return out.join("\n").replace(/\n{3,}/g, "\n\n") + "\n";

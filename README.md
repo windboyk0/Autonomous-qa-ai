@@ -23,6 +23,7 @@ packages/
                   login.ts · collector.ts · capture.ts (증적)
                   fingerprint.ts · discover.ts · classify.ts · explorer.ts (탐색)
                   visual.ts · detect.ts · judge.ts · report.ts (검출·리포트)
+                  ai/ (Provider 추상화 · 실패 폴백)
   fixture-admin/  정답을 아는 목 관리자웹. 의도적 버그 10개
 apps/
   desktop/        Electron 셸 (Phase 5)
@@ -30,9 +31,10 @@ apps/
 
 ## 현재 상태
 
-**Phase 3 완료.** 로그인 → 자율 탐색 → 룰 검출 → `report.md` 까지 **AI 없이** 동작한다.
+**Phase 4 완료.** 로그인 → 자율 탐색 → 룰 검출 → AI 보강 → `report.md` 까지 동작한다.
 fixture 대상 13개 화면을 결정적으로 완주하고, 정답지 8건을 오탐 0건으로 탐지한다.
-AI Provider 연동은 Phase 4부터.
+AI Provider(Ollama·Claude)를 붙였고, **AI가 죽어도 룰 기반 리포트는 그대로** 나온다.
+Electron 셸은 Phase 5부터.
 
 ## 시작하기
 
@@ -63,6 +65,19 @@ pnpm qa --url http://localhost:3100 --user admin --headless
 
 비밀번호는 `QA_PASSWORD` 환경변수 > `--pass-stdin` > `--pass` 순으로 찾는다.
 `--pass`는 셸 히스토리와 프로세스 목록에 평문으로 남아 경고가 나온다.
+
+AI 보강을 켜려면 (선택):
+
+```powershell
+# 로컬 Ollama
+pnpm qa --url http://localhost:3100 --user admin --headless `
+        --provider ollama --model qwen3.5:9b
+
+# Claude Code CLI (설치·로그인 필요)
+pnpm qa --url http://localhost:3100 --user admin --headless --provider claude
+```
+
+**AI는 덧붙이기만 한다.** Provider가 없거나 죽어도 룰 기반 `report.md`는 그대로 나온다.
 
 테스트:
 

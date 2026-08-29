@@ -44,8 +44,31 @@ export const PageAnalysisResult = z.object({
 });
 
 // ── analyzeFunction ────────────────────────────────────────────────────────
+/**
+ * 설명을 요청할 결함의 사실 관계.
+ *
+ * **여기 담긴 것만 모델에게 준다.** 실측에서 이걸 소홀히 했다가 대가를 치렀다:
+ * 네트워크 결함(`/api/stats/export` 500)에 무관한 화면 이동 액션을 입력으로 넘겼더니
+ * 모델이 그 액션에 대해 그럴듯한 분석을 써냈고, 그게 올바른 룰 문장을 덮어썼다.
+ * 잘못된 입력을 주면 모델은 조용히, 자신 있게 잘못된 답을 낸다.
+ */
+export const AnalysisFinding = z.object({
+  ruleId: z.string(),
+  title: z.string(),
+  description: z.string(),
+  screens: z.array(z.string()),
+  occurrenceCount: z.number().int().positive(),
+});
+export type AnalysisFinding = z.infer<typeof AnalysisFinding>;
+
 export const FunctionalAnalysisInput = z.object({
-  action: ActionResult,
+  /**
+   * 액션에서 비롯된 판정이면 그 액션.
+   * 네트워크·콘솔·화면 결함처럼 특정 액션에 귀속되지 않으면 null이다.
+   * **없는데 아무거나 채워 넣지 말 것.**
+   */
+  action: ActionResult.nullable(),
+  finding: AnalysisFinding,
   /** 룰이 이미 내린 판정. AI는 이걸 뒤집지 않고 원인만 설명한다. */
   ruleVerdict: z.enum(["PASS", "FAIL", "INCONCLUSIVE"]),
   networkEntries: z.array(NetworkEntry),

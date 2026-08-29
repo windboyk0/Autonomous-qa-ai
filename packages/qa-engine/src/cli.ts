@@ -52,6 +52,9 @@ AI
   --provider <none|ollama|claude>   기본 none
   --model <MODEL>                   ollama 모델명
   --ollama-url <URL>                기본 http://localhost:11434
+  --vision                          모델이 Vision을 지원할 때만 지정 (기본 꺼짐)
+  --ai-timeout <MS>                 호출당 상한, 기본 120000
+  --ai-concurrency <N>              동시 호출 상한, 기본 2
 
 범위
   --create --update --delete        쓰기 테스트 활성화 (delete는 --delete-consent 필요)
@@ -138,6 +141,9 @@ function buildConfig(args: RawArgs, password: string): RunConfig {
         : "none",
       baseUrl: str("ollama-url", "http://localhost:11434"),
       model: str("model"),
+      visionCapable: args.vision === true,
+      timeoutMs: num("ai-timeout", 120_000),
+      maxConcurrency: num("ai-concurrency", 2),
     },
     budget: {
       maxScreens: num("max-screens", 120),
