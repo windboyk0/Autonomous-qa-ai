@@ -1,10 +1,11 @@
 import type { RunConfig, RunStatus } from "@qa/shared";
-import { emit, log } from "./emitter.js";
+import { log } from "./emitter.js";
 import { launch, preflightBrowser } from "./browser.js";
 import { Collector } from "./collector.js";
 import { captureScreen } from "./capture.js";
 import { login } from "./login.js";
 import type { RunContext } from "./run-context.js";
+import { Explorer, makeStartPlan } from "./explorer.js";
 
 export interface RunOutcome {
   status: RunStatus;
@@ -14,8 +15,7 @@ export interface RunOutcome {
 /**
  * Run 본체.
  *
- * Phase 1 범위: Preflight → Login → 착지 화면 증적 수집.
- * 자율 탐색(Phase 2)은 로그인 성공 지점 뒤에 붙는다.
+ * Preflight → Login → 자율 탐색 → (Phase 3) 검출·리포트.
  *
  * CLI에서 분리해 둔 이유는 통합 테스트가 프로세스를 띄우지 않고
  * 이 함수만 직접 호출할 수 있게 하기 위해서다.
@@ -76,30 +76,28 @@ export async function runQa(config: RunConfig, ctx: RunContext): Promise<RunOutc
       return { status: "FAILED", message: result.reason };
     }
 
-    const landedName = (await session.page.title()) || "로그인후";
-    await captureScreen(session.page, ctx, collector, {
-      stateKey: "post-login",
-      screenName: landedName,
-    });
+    // ── 자율 탐색 ─────────────────────────────────────────────────────
+    const explorer = new Explorer(session.page, ctx, collector, config);
+    const explored = await explorer.explore(makeStartPlan(result.landedUrl));
 
-    emit({
-      type: "run:progress",
-      at: new Date().toISOString(),
-      screensExplored: 2,
-      screensQueued: 0,
-      actionsExecuted: 1,
-      currentTask: "로그인 완료",
-      currentScreen: landedName,
-    });
+    ctx.writeJson("actions", "graph.json", explored.graph);
+
+    const executed = explored.actionResults.filter((r) => r.outcome === "EXECUTED").length;
+    const skipped = explored.actionResults.length - executed;
 
     log(
-      "warn",
-      "자율 탐색은 Phase 2에서 구현됩니다. 현재는 로그인과 착지 화면 증적까지 수집합니다.",
+      "info",
+      `탐색 완료: 화면 ${explored.graph.nodes.length}개 · 액션 실행 ${executed}건 · 미실행 ${skipped}건`,
     );
+    for (const limit of explored.limits) log("warn", `탐색 제한: ${limit}`);
+
+    log("warn", "룰 기반 검출과 리포트 생성은 Phase 3에서 구현됩니다.");
 
     return {
       status: "COMPLETED",
-      message: `로그인 성공 후 착지: ${result.landedUrl} (증적 ${ctx.listEvidences().length}건)`,
+      message:
+        `화면 ${explored.graph.nodes.length}개 탐색 · 액션 ${executed}건 실행 · ` +
+        `증적 ${ctx.listEvidences().length}건`,
     };
   } finally {
     await session.close();

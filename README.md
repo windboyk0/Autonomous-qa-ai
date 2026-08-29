@@ -19,7 +19,9 @@ Playwright가 자율 탐색하며 증적을 모으고, `report.md` + `issues.jso
 packages/
   shared/         데이터 계약. RunConfig · PageState · Action · Evidence · Issue · EngineEvent
   qa-engine/      QA 엔진. Playwright 탐색 + 검출 + 리포트
-                  cli.ts 인자파싱 · run.ts Run본체 · login.ts · collector.ts · capture.ts
+                  cli.ts 인자파싱 · run.ts Run본체
+                  login.ts · collector.ts · capture.ts (증적)
+                  fingerprint.ts · discover.ts · classify.ts · explorer.ts (탐색)
   fixture-admin/  정답을 아는 목 관리자웹. 의도적 버그 10개
 apps/
   desktop/        Electron 셸 (Phase 5)
@@ -27,7 +29,9 @@ apps/
 
 ## 현재 상태
 
-**Phase 1 완료.** 로그인과 증적 수집까지 동작한다. 자율 탐색은 Phase 2부터.
+**Phase 2 완료.** 로그인 → 자율 탐색 → 증적 수집까지 동작한다.
+fixture 대상 13개 화면을 결정적으로 완주하며, 위험 액션은 하나도 실행하지 않는다.
+룰 기반 검출과 `report.md` 생성은 Phase 3부터.
 
 ## 시작하기
 

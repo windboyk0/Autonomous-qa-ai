@@ -33,12 +33,18 @@ function walk(dir: string): string[] {
   return out;
 }
 
+/**
+ * Phase 1이 보는 것은 로그인과 증적 수집까지다.
+ * `runQa`는 Phase 2부터 전체 탐색까지 하므로, 여기서는 예산을 최소로 묶어
+ * 로그인 직후 화면 몇 개만 보고 끝내게 한다. (탐색 자체는 phase2 테스트가 본다)
+ */
 function makeConfig(overrides: Partial<Record<string, unknown>> = {}) {
   return RunConfig.parse({
     projectName: "fixture",
     targetUrl: fixture.url,
     headless: true,
     login: { enabled: true, username: "admin", password: PASSWORD },
+    budget: { maxScreens: 2, settleMs: 100 },
     ...overrides,
   });
 }
@@ -62,7 +68,7 @@ describe("Phase 1 — 로그인 + 증적 수집", () => {
   beforeAll(async () => {
     ctx = new RunContext(makeRunId(), outDir, ".");
     outcome = await runQa(makeConfig(), ctx);
-  }, 120_000);
+  }, 300_000);
 
   it("로그인에 성공하고 Run이 완료된다", () => {
     expect(outcome.status).toBe("COMPLETED");
@@ -187,5 +193,5 @@ describe("Phase 1 — 로그인 실패 경로", () => {
       if (/\.(png|jpg|jpeg)$/i.test(file)) continue;
       expect(readFileSync(file, "utf8"), `${file} 에 비밀번호 노출`).not.toContain(WRONG_PASSWORD);
     }
-  }, 120_000);
+  }, 300_000);
 });

@@ -1,65 +1,87 @@
 # KNOWN_SCREENS — 탐색 정답지
 
-Phase 2 DoD의 채점 기준. **SAFE 액션만으로 도달 가능한 상태 15개**다.
+Phase 2 DoD의 채점 기준. **SAFE 액션만으로 도달 가능한 상태 13개**다.
+(로그인 화면을 더하면 증적이 남는 화면은 14개. 로그인은 탐색 전에 처리되므로 그래프에는 없다)
+
+이 표는 실측으로 검증되었다 — `packages/qa-engine/src/phase2.integration.test.ts`
 
 | # | screenName | pathTemplate | 구별 신호 | 도달 경로 |
 |---|---|---|---|---|
-| 1 | 관리자 로그인 | `/login` | — | 시작 |
-| 2 | 대시보드 | `/dashboard` | — | 로그인 성공 후 리다이렉트 |
-| 3 | 사용자관리 | `/users` | queryKeys `[]` | 사이드바 |
-| 4 | 사용자관리(조회조건) | `/users` | queryKeys `[keyword,sort,dir,page]` | 검색/정렬/페이징 |
-| 5 | 사용자 등록 | `/users/new` | — | 목록 > 신규 등록 |
-| 6 | 사용자 상세 | `/users/:id` | dialog `null` | 목록 > 이름 클릭 |
-| 7 | 사용자 상세(접속이력) | `/users/:id` | dialog `접속이력` | 상세 > 접속이력 보기 |
-| 8 | 설문관리 | `/surveys` | queryKeys `[]` | 사이드바 |
-| 9 | 설문관리(상태필터) | `/surveys` | queryKeys `[status]` | 진행중/종료/보관 |
-| 10 | 설문 등록 | `/surveys/new` | — | 목록 > 신규 등록 |
-| 11 | 설문 상세 | `/surveys/:id` | — | 목록 > 제목 클릭 |
-| 12 | 설문응답통계관리센터 | `/stats` | — | 사이드바 |
-| 13 | 설정(일반) | `/settings` | activeTab `일반` | 사이드바 |
-| 14 | 설정(알림) | `/settings` | activeTab `알림` | 설정 > 알림 탭 |
-| 15 | 설정(보안) | `/settings` | activeTab `보안` | 설정 > 보안 탭 |
+| 1 | 대시보드 | `/dashboard` | — | 로그인 성공 후 리다이렉트 |
+| 2 | 사용자관리 | `/users` | — | 사이드바 |
+| 3 | 사용자 등록 | `/users/new` | — | 목록 > 신규 등록 |
+| 4 | 테스트사용자1 상세 | `/users/:id` | dialog `null` | 목록 > 이름 클릭 |
+| 5 | 테스트사용자1 상세 > 접속이력 | `/users/:id` | dialog `접속이력` | 상세 > 접속이력 보기 |
+| 6 | 설문관리 | `/surveys` | structure A (표 보임) | 사이드바 |
+| 7 | 설문관리 (보관 필터) | `/surveys` | structure B (스피너만) | 목록 > 보관 |
+| 8 | 설문 등록 | `/surveys/new` | — | 목록 > 신규 등록 |
+| 9 | 2026년 1차 만족도 조사 | `/surveys/:id` | — | 목록 > 제목 클릭 |
+| 10 | 설문응답통계관리센터 | `/stats` | — | 사이드바 |
+| 11 | 설정 > 일반 | `/settings` | activeTab `일반` | 사이드바 |
+| 12 | 설정 > 알림 | `/settings` | activeTab `알림` | 설정 > 알림 탭 |
+| 13 | 설정 > 보안 | `/settings` | activeTab `보안` | 설정 > 보안 탭 |
 
-## 지문 정규화 규칙 (Phase 2에서 반드시 구현)
+## 지문 규칙 (구현: `packages/qa-engine/src/fingerprint.ts`)
 
-이 fixture는 아래 4가지 규칙을 검증하도록 설계되어 있다.
+`stateKey = sha1(pathTemplate + heading + activeTab + dialogTitle + navLabels + structureHash)`
 
-1. **경로의 숫자 세그먼트는 `:id`로 정규화**
-   `/users/1` `/users/2` … `/users/47` 이 47개 상태가 되면 안 된다 → 상태 #6 하나.
+1. **경로의 숫자·UUID 세그먼트는 `:id`로 정규화**
+   `/users/1` ~ `/users/47` 이 47개 상태가 되면 안 된다 → 상태 #4 하나.
 
-2. **쿼리는 키만, 값은 버린다**
-   `/users?page=1` ~ `?page=5`, `?sort=name&dir=asc` 등 모든 조합이 상태 #4 하나로 수렴해야 한다.
-   값까지 지문에 넣으면 페이징·정렬 조합으로 상태가 폭발한다.
-   (정렬·페이징이 **동작했는지**는 상태 수가 아니라 `ActionResult` 기록으로 검증한다)
+2. **쿼리는 지문에 넣지 않는다** ← Phase 2에서 바뀐 결정
+   처음에는 "값은 버리고 키만 넣는다"로 설계했으나 fixture에서 바로 깨졌다.
+   같은 `/users` 화면인데 도달 경로마다 키 집합이 달라진다:
+   - 검색 버튼 → `?keyword=` (키 1개)
+   - 정렬 헤더 → `?keyword=&sort=&dir=&page=` (키 4개)
+   - 페이저 → 위와 동일
 
-3. **`activeTab`이 있으면 `queryKeys`에서 `tab`을 제외한다**
-   `/settings`(탭 파라미터 없음, 일반 탭)와 `/settings?tab=general`은 **같은 상태**여야 한다.
-   이 규칙이 없으면 상태 #13이 두 개로 갈라진다.
+   정렬·페이징·필터가 **동작했는지**는 상태 수가 아니라 `ActionResult`와
+   그 구간의 네트워크 기록으로 검증한다. 겉모습이 실제로 달라지는 필터는
+   3번 규칙이 알아서 구별한다(상태 #7이 그 예다).
+
+3. **구조 해시는 보이는 요소만, 형제 중복은 접고, 정렬한다**
+   - 안 보이는 요소 제외 → 스피너만 남은 화면(#7)이 정상 목록(#6)과 구별된다
+   - 같은 직렬화 결과를 갖는 형제는 하나로 접음 → 목록 10행과 3행이 같은 화면
+   - 접은 뒤 정렬 → 페이저의 현재 페이지 표시가 앞뒤로 움직여도 같은 화면
+   - 텍스트 노드 제외 → 데이터가 바뀌어도 같은 화면
+   - 깊이 상한 6
 
 4. **다이얼로그 개폐는 상태 변화다**
-   `/users/:id`와 `/users/:id`+접속이력 모달은 서로 다른 상태(#6, #7)다.
-   URL이 같다고 같은 화면으로 묶으면 모달 안의 화면을 전부 놓친다.
+   #4와 #5는 URL이 같지만 다른 상태다. 묶으면 모달 안을 통째로 놓친다.
 
 ## 실행되면 안 되는 액션 (DANGEROUS)
 
-탐색 중 발견되지만 `SKIPPED_RISK`로 기록만 되어야 한다. 하나라도 실행되면 Phase 2 실패.
+탐색 중 발견되지만 사유와 함께 기록만 되어야 한다. 하나라도 실행되면 Phase 2 실패.
 
-| 라벨 | 위치 | data-testid |
+| 라벨 | 위치 | 차단 사유 |
 |---|---|---|
-| 로그아웃 | 전 화면 헤더 | `logout` |
-| 선택 일괄 잠금 | `/users` | `user-bulk-lock` |
-| 권한 변경 | `/users/:id` | `user-role-change` |
-| 삭제 | `/users/:id` | `user-delete` |
-| 게시 | `/surveys/:id` | `survey-publish` |
-| 응답자 알림 발송 | `/surveys/:id` | `survey-notify` |
-| 삭제 | `/surveys/:id` | `survey-delete` |
-| 테스트 메일 발송 | `/settings?tab=notify` | `settings-test-mail` |
-| 설정 초기화 | `/settings?tab=security` | `settings-reset` |
+| 로그아웃 | 전 화면 헤더 (12회 발견) | denylist |
+| 선택 일괄 잠금 | `/users` | denylist (`일괄`) |
+| 권한 변경 | `/users/:id` | 위험 라벨 |
+| 삭제 | `/users/:id`, `/surveys/:id` | 위험 라벨 |
+| 게시 | `/surveys/:id` | denylist |
+| 응답자 알림 발송 | `/surveys/:id` | denylist (`발송`) |
+| 테스트 메일 발송 | `/settings` 알림 탭 | denylist (`발송`) |
+| 설정 초기화 | `/settings` 보안 탭 | denylist (`초기화`) |
 
 **로그아웃이 실행되면 세션이 끊겨 이후 탐색이 전부 로그인 화면으로 빨려 들어간다.**
 자율탐색이 처음 망가지는 지점이 대부분 여기다.
 
+CAUTION이라 실행되지 않는 것(Phase 6에서 실행): 저장 ×2, 엑셀 내보내기.
+
+## 실측 기준값
+
+| 항목 | 값 |
+|---|---|
+| 방문 상태 | 13 |
+| 그래프 간선 | 12 |
+| 액션 기록 | 168 |
+| 실행 (전부 SAFE) | 145 |
+| 미실행 | 23 |
+| 클릭 실패 | 0 |
+
 ## 결정성
 
-시드 데이터에 난수·현재시각이 없다. 따라서 같은 설정으로 2회 실행하면
-방문 상태 집합과 그래프 간선이 **완전히 동일**해야 한다. 다르면 지문 설계가 잘못된 것이다.
+시드 데이터에 난수·현재시각이 없고, 액션 id도 내용 해시로 만든다.
+따라서 같은 설정으로 2회 실행하면 **상태 집합 · 방문 순서 · 간선 · 액션 결과가 완전히 동일**해야 한다.
+다르면 지문 설계가 잘못된 것이다.

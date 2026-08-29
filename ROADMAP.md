@@ -19,7 +19,7 @@ Electron 창을 거치면 사이클이 느려지고, 오류 원인이 UI / IPC /
 
 ---
 
-## Phase 0 — 착지장
+## Phase 0 — 착지장 ✅
 
 - [x] `git init` + `.gitignore`
 - [x] 문서 정리 — `CLAUDE.md` 정본화 / `autonomous-qa.md`·zip → `docs/archive/`
@@ -32,7 +32,7 @@ Electron 창을 거치면 사이클이 느려지고, 오류 원인이 UI / IPC /
 **DoD** — `pnpm dev:fixture` → `localhost:3100` 목 관리자웹 동작, `pnpm build` 타입 통과,
 `packages/fixture-admin/KNOWN_BUGS.md`에 버그 10개 정답지 존재
 
-## Phase 1 — 엔진 CLI: 로그인 + 증적 수집
+## Phase 1 — 엔진 CLI: 로그인 + 증적 수집 ✅
 
 - `packages/qa-engine` CLI 진입점 (`--url --user --pass --out`)
 - **Login Agent** — 로그인 폼 탐지 → selector 추정 → 성공 판정(URL 변화 + 폼 소멸 + 세션쿠키)
@@ -62,16 +62,44 @@ Electron 창을 거치면 사이클이 느려지고, 오류 원인이 UI / IPC /
 - **증적 색인 저장은 `runQa`의 finally에서.** CLI에 두면 엔진을 직접 호출하는
   Phase 5의 Electron과 통합 테스트가 색인을 못 받는다.
 
-## Phase 2 — 자율 탐색 (Read-only)
+## Phase 2 — 자율 탐색 (Read-only) ✅
 
-- **State fingerprint 확정**: `URL경로 + h1 + 활성탭 + 다이얼로그유무 + 주요영역 태그구조 해시`
-  (텍스트 값은 제외 — 데이터가 바뀔 때마다 새 화면으로 오인하는 것을 막는다)
-- Action Discovery → Risk Classifier(**SAFE만 실행**) → 실행 → 상태변화 감지 → 큐
-- 가드레일: 로그아웃 링크 차단, 외부 도메인 이탈 차단, **예산**(최대 화면 N / 시간 T / 깊이 D)
-- 방문 그래프를 `runs/<ts>/graph.json`으로 기록
+- [x] **상태 지문** (`fingerprint.ts`) — `pathTemplate + heading + activeTab + dialogTitle + navLabels + structureHash`
+- [x] **Action Discovery** (`discover.ts`) — 모달이 열려 있으면 그 안만 훑는다
+- [x] **Risk Classifier** (`classify.ts`) — 7단계 우선순위, denylist 최우선
+- [x] **Explorer** (`explorer.ts`) — BFS 큐, 3중 실행 게이트, 예산, 세션 복구
+- [x] 가드레일: 로그아웃 차단, 외부 도메인 이탈 차단, 예산 4종
+- [x] 방문 그래프를 `runs/<ts>/actions/graph.json`으로 기록
 
-**DoD** — `KNOWN_SCREENS.md`의 화면을 전부, 중복 없이, 예산 내 탐색.
-**2회 연속 실행 결과가 동일**(결정성)
+**DoD 결과 — 통과 (테스트 78건 누계)**
+
+| 검증 | 결과 |
+|---|---|
+| `KNOWN_SCREENS.md` 13개 상태 완주 | 통과 (중복 0) |
+| 2회 연속 실행 결정성 | 상태·순서·간선·액션결과 **완전 동일** |
+| DANGEROUS 액션 실행 | **0건** (실행된 145건 전부 SAFE) |
+| 실행 금지 액션 8종 | 전부 사유와 함께 기록 |
+| 클릭 실패(FAILED) | 0건 |
+| id 폭발 방지 | `/users/:id` 상태 2개 (상세 + 모달) |
+| 탭·모달 구별 | `/settings` 3개, dialog 1개 |
+
+### Phase 2에서 확정된 설계
+
+- **쿼리는 지문에서 뺀다.** "키만 넣고 값은 버린다"로 설계했으나 실측에서 깨졌다 —
+  검색 버튼은 `?keyword=`, 정렬 헤더는 `?keyword=&sort=&dir=&page=` 를 만들어
+  같은 화면이 갈라진다. 자세한 근거는 `KNOWN_SCREENS.md`.
+- **구조 해시는 보이는 요소만 · 형제 접기 · 정렬.** 목록 행 수와 페이저 위치에
+  흔들리지 않으면서, 스피너만 남은 로딩 화면은 구별한다.
+- **링크는 라벨이 아니라 하는 일로 분류한다.** 라벨만 보면 "신규 등록" 링크가
+  CAUTION으로 막혀 등록 화면을 영영 못 본다 (실제로 놓쳤다).
+- **`<thead>` 안의 링크는 정렬 컨트롤이다.** `권한` 컬럼 헤더가 DANGEROUS로 막혔다.
+  단 denylist는 이 규칙보다 위에 있어 여전히 절대적이다 — 커버리지보다 안전.
+- **모달이 열려 있으면 그 안만 훑는다.** `<dialog>`는 바깥을 inert로 만들어서,
+  모르고 뒤쪽 메뉴를 클릭하면 전부 타임아웃 나고 리포트가 가짜 FAILED로 뒤덮인다.
+- **큐는 "도달 방법"을 담는다.** URL + 재생할 클릭 목록. 모달·탭처럼 URL이 없는
+  화면도 같은 방식으로 재방문할 수 있고, 재현이 결정적이다.
+- **계획 지문에서 id를 접는다.** 목록의 사용자 47명 링크가 전부 큐에 들어가면
+  46번은 방문 후 버려진다 — 예산만 태운다.
 
 ## Phase 3 — 룰 기반 검출 + 리포트 (AI 없음)
 

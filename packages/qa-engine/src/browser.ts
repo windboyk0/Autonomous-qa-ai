@@ -15,6 +15,18 @@ export interface BrowserSession {
   close(): Promise<void>;
 }
 
+/**
+ * esbuild(tsx·vitest)의 `keepNames` 변환은 이름 있는 함수를 `__name(fn, "이름")` 으로 감싼다.
+ * 그 코드가 `page.evaluate`로 브라우저에 넘어가면 `__name`이 없어 ReferenceError로 죽는다.
+ *
+ * 빌드 설정으로 끄는 것보다 페이지 쪽에 항등 함수를 하나 놔두는 편이 확실하다 —
+ * tsx로 실행하든 tsc로 빌드해 실행하든 똑같이 동작한다.
+ */
+function installEsbuildNameShim(): void {
+  const g = globalThis as unknown as { __name?: (fn: unknown) => unknown };
+  g.__name ??= (fn: unknown) => fn;
+}
+
 export async function launch(config: RunConfig): Promise<BrowserSession> {
   const browser = await chromium.launch({ headless: config.headless });
 
@@ -27,6 +39,8 @@ export async function launch(config: RunConfig): Promise<BrowserSession> {
   });
   context.setDefaultTimeout(config.budget.navigationTimeoutMs);
   context.setDefaultNavigationTimeout(config.budget.navigationTimeoutMs);
+
+  await context.addInitScript(installEsbuildNameShim);
 
   const page = await context.newPage();
 
