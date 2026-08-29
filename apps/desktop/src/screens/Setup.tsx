@@ -10,7 +10,7 @@ import { useStore } from "../store.js";
  * 나머지 기본값은 `RunConfig` 스키마가 채운다.
  */
 export function Setup() {
-  const { selectedProjectId, go, beginRun, setError } = useStore();
+  const { selectedProjectId, go, beginRun, setError, lastError } = useStore();
 
   const [name, setName] = useState("");
   const [targetUrl, setTargetUrl] = useState("http://localhost:3100");
@@ -36,9 +36,22 @@ export function Setup() {
   const [preflight, setPreflight] = useState<Preflight | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const [preflightError, setPreflightError] = useState<string | null>(null);
+
+  const loadPreflight = async () => {
+    try {
+      setPreflight(await qa().run.preflight());
+      setPreflightError(null);
+    } catch (err) {
+      // 삼키면 버튼이 영원히 비활성인데 이유가 어디에도 안 보인다.
+      setPreflight(null);
+      setPreflightError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
   useEffect(() => {
     void (async () => {
-      setPreflight(await qa().run.preflight());
+      await loadPreflight();
       if (selectedProjectId === null) return;
       const { project } = await qa().projects.get(selectedProjectId);
       if (!project) return;
@@ -82,8 +95,31 @@ export function Setup() {
     }
   };
 
+  /**
+   * QA를 시작할 수 없는 이유. 없으면 null.
+   *
+   * **이유를 화면에 그대로 보여준다.** 전에는 프로젝트가 선택되지 않으면
+   * 버튼이 눌려도 조용히 아무 일도 하지 않았고, 사용자는 "버튼이 안 눌린다"고만
+   * 알 수 있었다 (실측). 막는 것과 왜 막는지 말하는 것은 한 쌍이어야 한다.
+   */
+  const blockReason = ((): string | null => {
+    if (preflightError) return `실행 환경을 확인하지 못했습니다: ${preflightError}`;
+    if (!preflight) return "실행 환경을 확인하는 중입니다…";
+    if (preflight.engineError) return preflight.engineError;
+    if (preflight.running) return "이미 실행 중인 Run이 있습니다. 끝나면 다시 시도하세요.";
+    if (selectedProjectId === null) return "프로젝트를 먼저 선택하세요.";
+    if (!targetUrl.trim()) return "Target URL을 입력하세요.";
+    if (useLogin && !username.trim()) return "로그인을 쓰려면 아이디가 필요합니다.";
+    if (useLogin && !password && !hasStoredPassword) return "비밀번호를 입력하세요.";
+    if (del && !deleteConsent) return "삭제 테스트에 동의해야 시작할 수 있습니다.";
+    return null;
+  })();
+
   const start = async () => {
-    if (selectedProjectId === null) return;
+    if (selectedProjectId === null) {
+      setError("프로젝트를 먼저 선택하세요. 왼쪽 '프로젝트' 화면에서 만들거나 고를 수 있습니다.");
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -106,7 +142,6 @@ export function Setup() {
     }
   };
 
-  const engineReady = preflight?.enginePath !== null && preflight?.enginePath !== undefined;
 
   return (
     <div className="p-6 max-w-3xl">
@@ -117,13 +152,34 @@ export function Setup() {
         </button>
       </div>
 
-      {preflight?.engineError && (
+      {selectedProjectId === null && (
+        <div className="alert-warn mb-4" data-testid="no-project">
+          <b>선택된 프로젝트가 없습니다.</b>
+          <div className="mt-1">
+            QA는 프로젝트 단위로 실행됩니다. 먼저 프로젝트를 만들거나 고르세요.
+          </div>
+          <button className="btn-primary mt-2" data-testid="goto-projects" onClick={() => go("projects")}>
+            프로젝트 화면으로
+          </button>
+        </div>
+      )}
+
+      {(preflight?.engineError || preflightError) && (
         <div className="alert-error mb-4" data-testid="engine-error">
-          {preflight.engineError}
+          {preflight?.engineError ?? preflightError}
+          <button className="btn-ghost ml-2" onClick={() => void loadPreflight()}>
+            다시 확인
+          </button>
         </div>
       )}
       {preflight && !preflight.credentials.available && (
         <div className="alert-warn mb-4">{preflight.credentials.reason}</div>
+      )}
+      {/* 시작 실패 사유. 이걸 안 띄우면 "버튼을 눌렀는데 아무 일도 안 난다"가 된다. */}
+      {lastError && (
+        <div className="alert-error mb-4" data-testid="setup-error">
+          {lastError}
+        </div>
       )}
 
       <section className="card">
@@ -262,18 +318,28 @@ export function Setup() {
         </label>
       </section>
 
-      <div className="flex gap-2 mt-4">
+      <div className="flex items-center gap-2 mt-4">
         <button
           className="btn-primary"
           onClick={() => void start()}
-          disabled={busy || !engineReady || (del && !deleteConsent)}
+          disabled={busy || blockReason !== null}
           data-testid="start-qa"
         >
           QA 시작
         </button>
-        <button className="btn-ghost" onClick={() => void save()} disabled={busy}>
+        <button
+          className="btn-ghost"
+          onClick={() => void save()}
+          disabled={busy || selectedProjectId === null}
+        >
           설정만 저장
         </button>
+        {/* 버튼을 막았으면 왜 막았는지 반드시 옆에 적는다. */}
+        {blockReason && (
+          <span className="hint" data-testid="block-reason">
+            {blockReason}
+          </span>
+        )}
       </div>
     </div>
   );

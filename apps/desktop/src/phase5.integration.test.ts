@@ -109,6 +109,56 @@ describe("Phase 5 — 셸 기본", () => {
   });
 });
 
+describe("Phase 5 — 시작할 수 없으면 이유를 말한다", () => {
+  /**
+   * 실측에서 나온 문제. 좌측 메뉴로 QA 설정에 바로 들어가면 프로젝트가 선택되지 않은
+   * 상태인데, `QA 시작` 을 눌러도 조용히 아무 일도 일어나지 않았다.
+   * 사용자에게는 "버튼이 안 눌린다"로만 보인다.
+   *
+   * **막는 것과 왜 막는지 말하는 것은 한 쌍이어야 한다.**
+   */
+  it("프로젝트를 고르지 않으면 이유를 보여주고 갈 곳을 알려준다", async () => {
+    await page.click('[data-testid="nav-setup"]');
+    await page.waitForSelector('[data-testid="cfg-url"]');
+
+    expect(await page.locator('[data-testid="no-project"]').count()).toBe(1);
+    expect(await page.locator('[data-testid="goto-projects"]').count()).toBe(1);
+
+    const reason = (await page.textContent('[data-testid="block-reason"]')) ?? "";
+    expect(reason).toContain("프로젝트");
+
+    // 버튼은 비활성이어야 한다 — 눌러도 아무 일 없는 상태로 두지 않는다.
+    expect(await page.getAttribute('[data-testid="start-qa"]', "disabled")).not.toBeNull();
+  });
+
+  it("프로젝트 화면으로 가는 버튼이 실제로 동작한다", async () => {
+    await page.click('[data-testid="nav-setup"]');
+    await page.click('[data-testid="goto-projects"]');
+    await page.waitForSelector('[data-testid="project-new"]');
+    const cls = await page.getAttribute('[data-testid="nav-projects"]', "class");
+    expect(cls).toContain("on");
+  });
+
+  it("필수 입력이 비면 무엇이 비었는지 알려준다", async () => {
+    await page.click('[data-testid="nav-projects"]');
+    await page.click('[data-testid="project-new"]');
+    await page.waitForSelector('[data-testid="cfg-url"]');
+
+    // 새 프로젝트는 아이디·비밀번호가 비어 있다.
+    const reason = (await page.textContent('[data-testid="block-reason"]')) ?? "";
+    expect(reason.length).toBeGreaterThan(0);
+    expect(await page.getAttribute('[data-testid="start-qa"]', "disabled")).not.toBeNull();
+
+    await page.fill('[data-testid="cfg-user"]', "admin");
+    await page.fill('[data-testid="cfg-pass"]', PASSWORD);
+    await page.fill('[data-testid="cfg-url"]', fixture.url);
+
+    // 다 채우면 사유가 사라지고 버튼이 열린다.
+    expect(await page.locator('[data-testid="block-reason"]').count()).toBe(0);
+    expect(await page.getAttribute('[data-testid="start-qa"]', "disabled")).toBeNull();
+  });
+});
+
 describe("Phase 5 — 클릭만으로 QA 실행", () => {
   it("프로젝트 생성 → 설정 → QA 시작 → 리포트까지 클릭으로 끝난다", async () => {
     await page.click('[data-testid="nav-projects"]');
