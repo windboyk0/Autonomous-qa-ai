@@ -1,6 +1,7 @@
 import {
   redactRunConfig,
   type ActionResult,
+  type CrudResult,
   type Evidence,
   type AiProvider,
   type AiProviderConfig,
@@ -21,6 +22,7 @@ import { judge } from "./judge.js";
 import { renderReport } from "./report.js";
 import { AiGuard, createProvider, enrich, passthrough, type EnrichResult } from "./ai/index.js";
 import { NO_CONTROL, type RunControl } from "./control.js";
+import { CrudTester } from "./crud.js";
 
 export interface RunOutcome {
   status: RunStatus;
@@ -66,6 +68,8 @@ function unverifiedAreas(results: ActionResult[], config: RunConfig): string[] {
 
   for (const kind of ["create", "update", "delete"] as const) {
     if (!config.crud[kind]) out.push(`${kind.toUpperCase()} 테스트 — 설정에서 꺼져 있어 실행하지 않았습니다.`);
+    else if (kind === "delete" && !config.crud.deleteConsent)
+      out.push("DELETE 테스트 — 별도 삭제 동의가 없어 실행하지 않았습니다.");
   }
   if (config.ai.kind === "none") {
     out.push("AI 분석 (원인 추정·화면 평가·기능 누락 후보) — Provider를 사용하지 않았습니다.");
@@ -154,6 +158,8 @@ function buildSummary(input: {
   explored: ExploreResult;
   issues: Issue[];
   ai: EnrichResult | null;
+  crud?: CrudResult[];
+  leftovers?: string[];
   stopped?: boolean;
 }): RunSummary {
   const { runId, config, startedAt, explored, issues } = input;
@@ -178,25 +184,16 @@ function buildSummary(input: {
       medium: count("MEDIUM"),
       low: count("LOW"),
     },
-    crud: (["CREATE", "READ", "UPDATE", "DELETE"] as const).map((kind) => {
-      const on = kind === "READ" ? config.crud.read : config.crud[kind.toLowerCase() as "create"];
-      return {
-        kind,
-        executed: kind === "READ",
-        pass: 0,
-        fail: 0,
-        skipped: 0,
-        notExecutedReason: on
-          ? kind === "READ"
-            ? null
-            : "쓰기 테스트는 Phase 6에서 구현됩니다."
-          : "설정에서 꺼져 있습니다.",
-      };
-    }),
+    crud: input.crud ?? [],
     aiStatus: input.ai?.status ?? "not_used",
     aiFailureReason: input.ai?.failureReason ?? null,
     explorationLimits: explored.limits,
-    unverifiedAreas: unverifiedAreas(explored.actionResults, config),
+    unverifiedAreas: [
+      ...unverifiedAreas(explored.actionResults, config),
+      // 정리하지 못한 테스트 데이터는 **식별자와 함께** 반드시 남긴다.
+      // 사용자가 직접 지울 수 있어야 한다.
+      ...(input.leftovers ?? []).map((l) => `정리되지 않은 테스트 데이터: ${l}`),
+    ],
   };
 }
 
@@ -284,8 +281,19 @@ export async function runQa(
     );
     for (const limit of explored.limits) log("warn", `탐색 제한: ${limit}`);
 
+    // ── 쓰기 테스트 ───────────────────────────────────────────────────
+    // 탐색이 끝난 뒤에만 돈다. 탐색 중에 데이터를 만들면 화면이 바뀌어
+    // 상태 지문이 흔들리고 결정성이 깨진다.
+    const crud = new CrudTester(session.page, ctx, collector, config, options.control ?? NO_CONTROL);
+    const crudOutcome = await crud.run(explored.graph);
+
+    const leftovers = crudOutcome.ledger.leftovers();
+    if (leftovers.length > 0) {
+      log("warn", `정리하지 못한 테스트 데이터 ${leftovers.length}건: ${leftovers.map((r) => r.marker).join(", ")}`);
+    }
+
     // ── Issue 확정 (룰) ───────────────────────────────────────────────
-    const judged = judge(explored.candidates, explored.graph);
+    const judged = judge([...explored.candidates, ...crudOutcome.candidates], explored.graph);
     log(
       "info",
       `Issue 확정: 후보 ${judged.mergedFrom}건 → Issue ${judged.issues.length}건`,
@@ -313,6 +321,8 @@ export async function runQa(
       explored,
       issues: enriched.issues,
       ai: enriched,
+      crud: crudOutcome.results,
+      leftovers: leftovers.map((r) => `${r.marker} (${r.screen}) — ${r.cleanupError ?? "사유 미상"}`),
       stopped: options.control?.stopped ?? false,
     });
 

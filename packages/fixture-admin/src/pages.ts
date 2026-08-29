@@ -218,12 +218,59 @@ export function surveyDetailPage(s: Survey): string {
         </table>
       </div>
       <div class="toolbar">
+        <a class="btn" href="/surveys/${s.id}/edit" data-testid="survey-edit">수정</a>
         <button class="danger" data-testid="survey-publish" onclick="alert('게시')">게시</button>
         <button class="danger" data-testid="survey-notify" onclick="alert('알림 발송')">응답자 알림 발송</button>
-        <button class="danger" data-testid="survey-delete" onclick="alert('삭제')">삭제</button>
+        <button class="danger" data-testid="survey-delete" onclick="doDelete(${s.id})">삭제</button>
         <a href="/surveys">목록</a>
       </div>`;
-  return shell({ title: "설문 상세", activeHref: "/surveys", body });
+  const script = `
+    function doDelete(id) {
+      fetch('/api/surveys/' + id, { method: 'DELETE' })
+        .then(function (r) {
+          if (!r.ok) { window.showToast('삭제에 실패했습니다.'); return; }
+          window.showToast('삭제되었습니다.');
+          setTimeout(function () { location.href = '/surveys'; }, 400);
+        });
+    }
+  `;
+  return shell({ title: "설문 상세", activeHref: "/surveys", body, script });
+}
+
+// ─────────────────────────────────────────────────────────────── 설문 수정
+export function surveyEditPage(s: Survey): string {
+  const body = `
+      <h1>설문 수정</h1>
+      <div class="card">
+        <form id="editForm">
+          <div class="field"><label for="title">제목 *</label><input id="title" name="title" type="text" value="${esc(s.title)}" data-testid="edit-survey-title"></div>
+          <div class="field"><label for="owner">담당자 *</label><input id="owner" name="owner" type="text" value="${esc(s.owner)}" data-testid="edit-survey-owner"></div>
+          <div class="field"><label for="memo">비고</label><textarea id="memo" name="memo" rows="3" data-testid="edit-survey-memo"></textarea></div>
+          <div class="toolbar">
+            <button type="button" class="primary" id="saveBtn" data-testid="edit-survey-save">저장</button>
+            <a class="btn" href="/surveys/${s.id}">취소</a>
+          </div>
+        </form>
+      </div>`;
+  const script = `
+    document.getElementById('saveBtn').addEventListener('click', function () {
+      fetch('/api/surveys/${s.id}', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          title: document.getElementById('title').value,
+          owner: document.getElementById('owner').value,
+          memo: document.getElementById('memo').value
+        })
+      }).then(function (r) { return r.ok ? r.json() : null; })
+        .then(function (d) {
+          if (!d) { window.showToast('수정에 실패했습니다.'); return; }
+          window.showToast('수정되었습니다.');
+          setTimeout(function () { location.href = '/surveys/${s.id}'; }, 400);
+        });
+    });
+  `;
+  return shell({ title: "설문 수정", activeHref: "/surveys", body, script });
 }
 
 // ─────────────────────────────────────────────────────────────── 설문 등록 (BUG-05)

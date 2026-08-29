@@ -23,6 +23,7 @@ packages/
                   login.ts · collector.ts · capture.ts (증적)
                   fingerprint.ts · discover.ts · classify.ts · explorer.ts (탐색)
                   visual.ts · detect.ts · judge.ts · report.ts (검출·리포트)
+                  forms.ts · testdata.ts · crud.ts (쓰기 테스트)
                   ai/ (Provider 추상화 · 실패 폴백)
   fixture-admin/  정답을 아는 목 관리자웹. 의도적 버그 10개
 apps/
@@ -31,8 +32,9 @@ apps/
 
 ## 현재 상태
 
-**Phase 5 완료.** Electron 앱에서 **클릭만으로** 로그인 → 자율 탐색 → 룰 검출 → AI 보강 → `report.md` 까지 동작한다.
-fixture 대상 13개 화면을 결정적으로 완주하고, 정답지 8건을 오탐 0건으로 탐지한다.
+**Phase 6 완료.** Electron 앱에서 **클릭만으로** 로그인 → 자율 탐색 → 룰 검출 → 쓰기 테스트 → AI 보강 → `report.md` 까지 동작한다.
+fixture 대상 14개 화면을 결정적으로 완주하고, **정답지 10건을 전부** 오탐 0건으로 탐지한다.
+쓰기 테스트(Create·Update·Delete)와 테스트 데이터 자동 정리까지 동작한다.
 AI Provider(Ollama·Claude)를 붙였고, **AI가 죽어도 룰 기반 리포트는 그대로** 나온다.
 패키징(설치본)은 Phase 7부터.
 
@@ -53,11 +55,15 @@ pnpm build
 pnpm dev:fixture     # http://localhost:3100  (admin / admin123!)
 ```
 
-엔진 실행 (로그인 + 착지 화면 증적까지):
+엔진 실행:
 
 ```powershell
 $env:QA_PASSWORD = 'admin123!'
 pnpm qa --url http://localhost:3100 --user admin --headless
+
+# 쓰기 테스트까지 (삭제는 별도 동의 필요)
+pnpm qa --url http://localhost:3100 --user admin --headless `
+        --create --update --delete --delete-consent --form-validation
 ```
 
 결과는 `runs/<yyyyMMdd_HHmmss>/` 에 쌓인다 — `screenshots/` `dom/` `aria/`

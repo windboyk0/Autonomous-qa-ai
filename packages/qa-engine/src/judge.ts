@@ -69,6 +69,12 @@ const FIX_EFFORT: Record<string, number> = {
   "NET-CORS": 3,
   "NET-TIMEOUT": 4,
   "FUNC-INFINITE-LOADING": 4,
+  "FUNC-NO-RESPONSE": 2,
+  "FUNC-NO-REQUEST": 3,
+  "FUNC-CLICK-FAILED": 2,
+  "FUNC-PHANTOM-SUCCESS": 4,
+  "FUNC-VALIDATION-MISSING": 2,
+  "DATA-CLEANUP-FAILED": 1,
 };
 
 /** 룰 id별 업무 영향도(1~5). */
@@ -88,6 +94,12 @@ const BUSINESS_IMPACT: Record<string, number> = {
   "NET-CORS": 4,
   "NET-TIMEOUT": 4,
   "FUNC-INFINITE-LOADING": 5,
+  "FUNC-NO-RESPONSE": 5,
+  "FUNC-NO-REQUEST": 5,
+  "FUNC-CLICK-FAILED": 4,
+  "FUNC-PHANTOM-SUCCESS": 5,
+  "FUNC-VALIDATION-MISSING": 3,
+  "DATA-CLEANUP-FAILED": 2,
 };
 
 /**
@@ -155,6 +167,12 @@ const RECOMMENDATION: Record<string, string> = {
   "VIS-TRUNCATE": "폭을 넓히거나 말줄임과 함께 전체 텍스트를 툴팁으로 제공하세요.",
   "VIS-HIDDEN-CTA": "버튼을 가리는 요소의 z-index와 배치를 조정하세요.",
   "FUNC-INFINITE-LOADING": "로딩 해제 조건과 실패 처리 경로를 확인하세요. 응답이 없어도 로딩은 끝나야 합니다.",
+  "FUNC-NO-RESPONSE": "저장 버튼에 처리 핸들러가 연결되어 있는지 확인하세요.",
+  "FUNC-NO-REQUEST": "화면은 이동했지만 서버 요청이 없습니다. 저장 흐름이 중간에 끊기지 않았는지 확인하세요.",
+  "FUNC-CLICK-FAILED": "버튼이 다른 요소에 가려져 있거나 비활성 상태인지 확인하세요.",
+  "FUNC-PHANTOM-SUCCESS": "성공 응답을 주는 경로와 실제 저장 경로가 일치하는지 확인하세요. 트랜잭션이 롤백되고 있을 수 있습니다.",
+  "FUNC-VALIDATION-MISSING": "필수 항목에 대한 검증을 클라이언트와 서버 양쪽에 추가하세요.",
+  "DATA-CLEANUP-FAILED": "남은 AUTO-QA 테스트 데이터를 직접 삭제하세요. 아래 식별자로 찾을 수 있습니다.",
 };
 
 const IMPACT: Record<string, string> = {
@@ -174,6 +192,12 @@ const IMPACT: Record<string, string> = {
   "VIS-TRUNCATE": "메뉴나 항목의 이름을 끝까지 읽을 수 없습니다.",
   "VIS-HIDDEN-CTA": "해당 동작을 실행할 수 없습니다.",
   "FUNC-INFINITE-LOADING": "화면 내용을 아예 볼 수 없어 업무가 진행되지 않습니다.",
+  "FUNC-NO-RESPONSE": "저장 자체가 되지 않아 해당 업무를 진행할 수 없습니다.",
+  "FUNC-NO-REQUEST": "저장한 줄 알았지만 서버에 전달되지 않았습니다.",
+  "FUNC-CLICK-FAILED": "해당 동작을 실행할 수 없습니다.",
+  "FUNC-PHANTOM-SUCCESS": "성공 메시지를 믿고 넘어가면 데이터가 유실됩니다. 가장 발견하기 어려운 종류의 결함입니다.",
+  "FUNC-VALIDATION-MISSING": "잘못된 데이터가 그대로 저장되어 이후 업무와 통계가 오염됩니다.",
+  "DATA-CLEANUP-FAILED": "QA가 만든 테스트 데이터가 대상 시스템에 남아 있습니다.",
 };
 
 export interface JudgeResult {

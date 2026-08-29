@@ -59,6 +59,7 @@ AI
 
 범위
   --create --update --delete        쓰기 테스트 활성화 (delete는 --delete-consent 필요)
+  --form-validation                 필수 항목 검증 탐침 (폼당 최대 3건 데이터 생성)
   --max-screens <N>                 기본 120
   --max-duration <MS>               기본 900000
 
@@ -136,6 +137,7 @@ function buildConfig(args: RawArgs, password: string): RunConfig {
       delete: args.delete === true,
       deleteConsent: args["delete-consent"] === true,
     },
+    checks: { formValidation: args["form-validation"] === true },
     ai: {
       kind: (["none", "ollama", "claude"] as const).includes(str("provider", "none") as never)
         ? (str("provider", "none") as "none" | "ollama" | "claude")

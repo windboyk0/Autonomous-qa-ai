@@ -214,15 +214,40 @@ Electron 창을 거치면 사이클이 느려지고, 오류 원인이 UI / IPC /
 - **증적은 main이 data URL로 넘긴다.** 렌더러에 파일시스템 접근을 주지 않고,
   렌더러가 보낸 상대경로는 `safeJoin`으로 경로 탈출을 막는다.
 
-## Phase 6 — 쓰기 테스트 (CRUD)
+## Phase 6 — 쓰기 테스트 (CRUD) ✅
 
-- Test Data Agent (`AUTO-QA-yyyyMMdd-HHmmss-SEQ`) → Form 분석 → Create
-- **Functional PASS 판정** = POST 2xx + Toast + 목록 재조회 존재
-- Create 안정화 후 Update, 마지막에 Delete(별도 명시적 동의 + QA 생성 데이터 한정)
-- Cleanup, 실패 시 Warning 기록
+- [x] **Test Data Agent** (`testdata.ts`) — `AUTO-QA-yyyyMMdd-HHmmss-SEQ` 대장, 소유권 판정
+- [x] **폼 분석** (`forms.ts`) — 필드 종류·필수 여부·저장 버튼 인식
+- [x] **CRUD Test Agent** (`crud.ts`) — Create → 검증 탐침 → Update → Delete → Cleanup
+- [x] **Functional PASS 판정** = 쓰기 요청 발생 + 2xx + 성공 신호 + 목록 재조회 존재
+- [x] fixture에 수정·삭제 경로 추가 (없으면 Update/Delete를 검증할 수 없다)
 
-**DoD** — fixture에서 Create PASS/FAIL 정확 판정(BUG-06 저장 무반응을 FAIL로 검출),
-cleanup 후 잔여 `AUTO-QA-*` 데이터 0건
+**DoD 결과 — 통과 (테스트 200건 누계)**
+
+| 검증 | 결과 |
+|---|---|
+| Create PASS/FAIL 정확 판정 | PASS 1 · FAIL 1 |
+| **BUG-06 저장 무반응 → FAIL** | `FUNC-NO-RESPONSE` 로 검출 |
+| **BUG-05 검증 누락 → 검출** | `FUNC-VALIDATION-MISSING` (담당자 이메일) |
+| Update / Delete | 각 PASS, FAIL 0 |
+| **cleanup 후 잔여 `AUTO-QA-*`** | **0건** (fixture API로 직접 확인) |
+| 정답지 10건 전체 | **10/10 탐지** |
+
+### Phase 6에서 확정된 설계
+
+- **`edit` 경로를 등록 화면으로 착각하면 실데이터가 수정된다.** 실측에서
+  `/surveys/:id/edit` 을 Create 대상으로 잡아 **기존 시드 데이터를 수정해 버렸다.**
+  경로 패턴에서 `edit` 를 빼고, 그것만으로는 부족하므로 **폼에 이미 값이 들어 있고
+  그것이 AUTO-QA 표식이 아니면 건드리지 않는** 2차 방어를 넣었다.
+  이름만 등록처럼 보이는 화면이 실제 관리자웹에 있다.
+- **필수 필드를 하나씩만 비운다.** 한 번에 여러 개를 비우면 어느 필드의 검증이
+  빠졌는지 특정할 수 없다. 폼당 최대 3개까지 탐침한다 — 탐침마다 레코드가 쌓인다.
+- **재조회 확인이 없으면 "UI만 성공"을 못 잡는다.** 토스트만 띄우고 저장은 안 되는
+  화면이 실제로 흔하다. 목록을 다시 열어 표식을 찾는 단계를 반드시 거친다.
+- **삭제 동의가 없으면 정리도 하지 않는다.** 사용자가 삭제를 허용하지 않았는데
+  뒷정리를 핑계로 지우면 안 된다. 대신 남은 데이터를 **식별자와 함께** 리포트에 남긴다.
+- **Update·Delete 대상은 대장에 있고 화면에서 표식이 확인된 것만.** 목록의
+  "첫 번째 행"을 대상으로 삼는 코드는 쓰지 않는다.
 
 ## Phase 7 — 패키징
 

@@ -17,6 +17,7 @@ import {
   userNewPage,
   surveysPage,
   surveyDetailPage,
+  surveyEditPage,
   surveyNewPage,
   statsPage,
   settingsPage,
@@ -141,6 +142,31 @@ export function createFixtureServer(port = DEFAULT_PORT): http.Server {
     return json(res, [...surveys, ...createdSurveys]);
   }
 
+  const surveyApiMatch = /^\/api\/surveys\/(\d+)$/.exec(path);
+  if (surveyApiMatch && (method === "PUT" || method === "DELETE")) {
+    const id = Number(surveyApiMatch[1]);
+    const pool = createdSurveys.some((s) => s.id === id) ? createdSurveys : surveys;
+    const index = pool.findIndex((s) => s.id === id);
+    if (index === -1) return json(res, { message: "not found" }, 404);
+
+    if (method === "DELETE") {
+      pool.splice(index, 1);
+      return json(res, { ok: true });
+    }
+
+    const raw = await readBody(req);
+    let payload: { title?: string; owner?: string } = {};
+    try {
+      payload = JSON.parse(raw);
+    } catch {
+      return json(res, { message: "invalid json" }, 400);
+    }
+    const target = pool[index]!;
+    if (payload.title !== undefined) target.title = payload.title;
+    if (payload.owner !== undefined) target.owner = payload.owner;
+    return json(res, target);
+  }
+
   if (path === "/api/users" && method === "GET") {
     return json(res, [...users, ...createdUsers]);
   }
@@ -170,6 +196,12 @@ export function createFixtureServer(port = DEFAULT_PORT): http.Server {
 
   if (path === "/surveys") return html(res, surveysPage(url.searchParams.get("status") ?? ""));
   if (path === "/surveys/new") return html(res, surveyNewPage());
+  const surveyEditMatch = /^\/surveys\/(\d+)\/edit$/.exec(path);
+  if (surveyEditMatch) {
+    const id = Number(surveyEditMatch[1]);
+    const s = [...surveys, ...createdSurveys].find((x) => x.id === id);
+    return s ? html(res, surveyEditPage(s)) : html(res, notFoundPage(), 404);
+  }
   const surveyMatch = /^\/surveys\/(\d+)$/.exec(path);
   if (surveyMatch) {
     const id = Number(surveyMatch[1]);
