@@ -50,6 +50,14 @@ export interface QaApi {
     pickFolder(): Promise<{ ok: boolean; dir: string | null }>;
   };
   ai: {
+    claudeStatus(): Promise<{
+      ok: boolean;
+      detail: string;
+      remediation: string | null;
+      needsLogin: boolean;
+      exe: string | null;
+    }>;
+    claudeLogin(): Promise<{ ok: boolean; error: string | null }>;
     ollamaModels(baseUrl: string): Promise<{
       ok: boolean;
       models: Array<{ name: string; sizeGb: number | null }>;

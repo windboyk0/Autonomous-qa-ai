@@ -60,6 +60,7 @@ const USAGE = `
     --pass <PW>            비권장. 셸 히스토리와 프로세스 목록에 그대로 남는다
 
 AI
+  --claude-status                   Claude Code 설치·로그인 상태만 확인하고 끝낸다
   --provider <none|ollama|claude>   기본 none
   --model <MODEL>                   ollama 모델명
   --ollama-url <URL>                기본 http://localhost:11434
@@ -194,6 +195,38 @@ async function main(): Promise<void> {
   const args = parseArgs(process.argv.slice(2));
   if (args.help === true || args.h === true) {
     process.stdout.write(USAGE + "\n");
+    return;
+  }
+
+  /*
+   * Claude Code 연결 점검.
+   *
+   * Electron 이 이 정보를 직접 구하려면 엔진 모듈을 main 프로세스로 import 해야 하고,
+   * 그러면 Playwright 까지 main 번들에 딸려 들어간다. 엔진에게 물어보는 편이 낫다 —
+   * 찾기 규칙도 한 곳에만 있게 된다.
+   */
+  if (args["claude-status"] === true) {
+    const { ClaudeProvider } = await import("./ai/claude.js");
+    const { resolveClaudeCli } = await import("./ai/claude-cli.js");
+    const status = await new ClaudeProvider({
+      kind: "claude",
+      baseUrl: "",
+      model: "",
+      claudeMode: "cli",
+      timeoutMs: 30_000,
+      maxConcurrency: 1,
+      visionCapable: true,
+    }).healthCheck();
+
+    process.stdout.write(
+      JSON.stringify({
+        ok: status.available,
+        detail: status.detail,
+        remediation: status.remediation,
+        needsLogin: !status.available && status.detail.includes("로그인"),
+        exe: resolveClaudeCli(),
+      }) + "\n",
+    );
     return;
   }
 

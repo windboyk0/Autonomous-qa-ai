@@ -7,7 +7,7 @@ body {
   font-family: "Malgun Gothic", system-ui, sans-serif;
   font-size: 14px;
   color: #0f172a;
-  background: #e8ecf1;
+  background: #0f172a;
 }
 
 .app {
@@ -16,11 +16,36 @@ body {
 }
 
 /*
- * 본문 바탕은 연한 회색, 카드는 흰색.
- * 둘을 같은 색으로 두면 카드 경계가 안 보여 화면이 한 덩어리로 읽힌다.
+ * 본문 바탕을 좌측 메뉴와 같은 색으로 둔다. 카드는 흰색이라 경계는 그대로 살아 있다.
+ *
+ * 바탕이 어두워지면 **카드 밖 글씨는 전부 안 보이게 된다.** 제목이 검은색이기
+ * 때문이다. 그래서 본문 기본 글자색을 밝게 두고, 흰 카드 안에서만 되돌린다.
  */
 .main {
-  background: #e8ecf1;
+  background: #0f172a;
+  color: #e2e8f0;
+}
+
+/* 흰 바탕 위로 돌아온 곳은 원래 글자색을 쓴다. */
+.card,
+.report,
+.alert-error,
+.alert-warn,
+.alert-ok {
+  color: #0f172a;
+}
+
+/*
+ * 흐린 보조 글씨. 어두운 바탕에서 #64748b 는 거의 읽히지 않는다.
+ * 카드 밖에서는 한 단계 밝게 쓰고, 카드 안에서는 원래대로 둔다.
+ * (뒤에 오는 .card 규칙이 같은 특정도에서 이긴다)
+ */
+.main .text-slate-500 {
+  color: #94a3b8;
+}
+.card .text-slate-500,
+.report .text-slate-500 {
+  color: #64748b;
 }
 
 .side {
@@ -69,9 +94,16 @@ body {
   min-width: 0;
 }
 
+/*
+ * 카드 바탕은 연한 회색.
+ *
+ * 흰색이면 어두운 본문 바탕 위에서 너무 세게 튄다. 한 단계 낮추면 경계는
+ * 그대로 살아 있으면서 눈이 편하고, **입력칸이 흰색으로 남아** 카드 안에서
+ * 어디에 쓰는지가 오히려 또렷해진다.
+ */
 .card {
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  background: #e8ecf1;
+  border: 1px solid #cbd5e1;
   border-radius: 6px;
   padding: 16px;
   margin-bottom: 16px;
@@ -123,6 +155,11 @@ label.row input[type="checkbox"] {
   color: #64748b;
   margin: 4px 0 0;
 }
+/* 카드 밖의 안내 문구는 어두운 바탕에서 한 단계 밝아야 읽힌다. */
+.main > .p-6 > .hint,
+.main > div > .hint {
+  color: #94a3b8;
+}
 
 .btn-primary,
 .btn-ghost {
@@ -138,17 +175,76 @@ label.row input[type="checkbox"] {
   border-color: #2563eb;
   color: #fff;
 }
+
+/*
+ * 버튼은 **놓인 바탕에 맞춰야 한다.**
+ *
+ * 본문 바탕이 어두워지자 흰 버튼이 화면을 때렸고, 비활성 버튼은 opacity 로
+ * 흐려져 글씨가 아예 안 보였다(실측). 어두운 바탕이 기본이고,
+ * 흰 카드·알림 안에서만 밝은 바탕용으로 되돌린다.
+ */
+.btn-ghost {
+  background: transparent;
+  border-color: #334155;
+  color: #e2e8f0;
+}
+.btn-ghost:hover:not(:disabled) {
+  background: #1e293b;
+}
+
+.card .btn-ghost,
+.alert-error .btn-ghost,
+.alert-warn .btn-ghost,
+.alert-ok .btn-ghost {
+  background: #fff;
+  border-color: #94a3b8;
+  color: #0f172a;
+}
+.card .btn-ghost:hover:not(:disabled) {
+  background: #f1f5f9;
+}
+
+/*
+ * 위험한 동작은 어디서든 빨강이어야 한다. 다만 밝은 바탕의 빨강을 어두운 바탕에
+ * 그대로 쓰면 읽히지 않으므로 한 단계 밝은 빨강을 쓴다.
+ */
+.btn-ghost.text-red-600 {
+  color: #f87171;
+}
+.card .btn-ghost.text-red-600 {
+  color: #dc2626;
+}
+
+/*
+ * 비활성은 **흐리게가 아니라 눌리지 않아 보이게** 한다.
+ * opacity 로 흐리면 글씨까지 같이 사라져 무슨 버튼인지 읽을 수 없다.
+ */
 .btn-primary:disabled,
-.btn-ghost:disabled {
-  opacity: 0.45;
+.btn-ghost:disabled,
+.btn-ghost.text-red-600:disabled {
   cursor: not-allowed;
+  background: #1e293b;
+  border-color: #334155;
+  color: #94a3b8;
+}
+.card .btn-primary:disabled,
+.card .btn-ghost:disabled {
+  background: #cbd5e1;
+  border-color: #94a3b8;
+  color: #475569;
 }
 
 .alert-error,
-.alert-warn {
+.alert-warn,
+.alert-ok {
   padding: 10px 12px;
   border-radius: 4px;
   font-size: 13px;
+}
+.alert-ok {
+  background: #f0fdf4;
+  border: 1px solid #bbf7d0;
+  color: #166534;
 }
 .alert-error {
   background: #fef2f2;
@@ -232,8 +328,8 @@ label.row input[type="checkbox"] {
 }
 
 .report {
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  background: #e8ecf1;
+  border: 1px solid #cbd5e1;
   border-radius: 6px;
   padding: 16px;
   font-family: Consolas, monospace;

@@ -1,5 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { spawn } from "node:child_process";
 import { BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { RunConfig, type EngineEvent, type Issue, type RunSummary } from "@qa/shared";
 import { EngineProcess, resolveEnginePath } from "./engine.js";
@@ -156,6 +157,41 @@ export class IpcLayer {
     return { ok: true as const, dir: result.filePaths[0] ?? null };
   });
 
+  /**
+   * Claude Code 연결 상태.
+   *
+   * 엔진에게 물어본다. main 프로세스가 직접 확인하려면 엔진 모듈을 import 해야 하고
+   * 그러면 Playwright 까지 main 번들에 들어간다. 찾기 규칙도 한 곳에만 있는 편이 낫다.
+   *
+   * 설치 여부와 **로그인 여부를 따로** 알려준다 — 조치가 다르기 때문이다.
+   */
+  ipcMain.handle("ai:claudeStatus", async () => this.claudeStatus());
+
+  /**
+   * Claude 로그인.
+   *
+   * `claude auth login` 은 브라우저를 열고 사용자 입력을 기다리는 **대화형** 명령이다.
+   * 창 없이 돌리면 아무 일도 안 일어난 것처럼 보이므로 콘솔 창을 띄워
+   * 사용자가 진행 상황을 직접 보게 한다. 앱은 기다리지 않는다.
+   */
+  ipcMain.handle("ai:claudeLogin", async () => {
+    const status = await this.claudeStatus();
+    if (!status.exe) {
+      return { ok: false as const, error: "Claude Code CLI를 찾지 못했습니다. 먼저 설치하세요." };
+    }
+    try {
+      const child = spawn(
+        process.env.ComSpec ?? "cmd.exe",
+        ["/d", "/s", "/c", `start "Claude 로그인" cmd /k ""${status.exe}" auth login"`],
+        { detached: true, stdio: "ignore", windowsVerbatimArguments: true },
+      );
+      child.unref();
+      return { ok: true as const, error: null };
+    } catch (err) {
+      return { ok: false as const, error: err instanceof Error ? err.message : String(err) };
+    }
+  });
+
   ipcMain.handle("ai:ollamaModels", async (_e, baseUrl: string) => {
       try {
         const res = await fetch(new URL("/api/tags", baseUrl).toString(), {
@@ -219,6 +255,58 @@ export class IpcLayer {
    * 경로 탈출 방지.
    * 렌더러가 보낸 상대경로를 그대로 붙이면 `../../` 로 아무 파일이나 읽을 수 있다.
    */
+  /** 엔진을 짧게 띄워 Claude 상태만 물어본다. */
+  private claudeStatus(): Promise<{
+    ok: boolean;
+    detail: string;
+    remediation: string | null;
+    needsLogin: boolean;
+    exe: string | null;
+  }> {
+    return new Promise((resolve) => {
+      const fail = (detail: string) =>
+        resolve({ ok: false, detail, remediation: null, needsLogin: false, exe: null });
+
+      let enginePath: string;
+      try {
+        enginePath = resolveEnginePath();
+      } catch (err) {
+        fail(err instanceof Error ? err.message : String(err));
+        return;
+      }
+
+      const child = spawn(process.execPath, [enginePath, "--claude-status"], {
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+        windowsHide: true,
+      });
+
+      let out = "";
+      let errText = "";
+      child.stdout.on("data", (d: Buffer) => {
+        out += d.toString("utf8");
+      });
+      child.stderr.on("data", (d: Buffer) => {
+        errText += d.toString("utf8");
+      });
+      child.on("error", (e) => fail(`상태를 확인하지 못했습니다: ${e.message}`));
+      child.on("close", (code) => {
+        const last = out.trim().split(/\r?\n/).pop() ?? "";
+        try {
+          resolve(JSON.parse(last));
+        } catch {
+          /*
+           * 무엇이 왔는지 보여준다. 실측에서 오래된 엔진 번들이 USAGE 를 출력하는 바람에
+           * 여기로 왔는데, "읽지 못했습니다"만으로는 원인을 알 길이 없었다.
+           */
+          fail(
+            `상태 응답을 읽지 못했습니다 (종료 코드 ${code}). 엔진이 오래된 판본일 수 있습니다. ` +
+              `받은 출력: ${(errText.trim() || last).slice(0, 200)}`,
+          );
+        }
+      });
+    });
+  }
+
   private safeJoin(runDir: string, relPath: string): string | null {
     const base = resolve(this.workspaceRoot, runDir);
     if (!base.startsWith(resolve(this.workspaceRoot))) return null;

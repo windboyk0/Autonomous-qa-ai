@@ -37,21 +37,37 @@ function knownLocations(): string[] {
   ];
 }
 
-/** PATH 를 직접 훑는다. Windows 는 확장자를 붙여 봐야 한다. */
+/**
+ * 확장자 우선순위. **네이티브 실행 파일을 먼저 고른다.**
+ *
+ * `.cmd` 는 배치 래퍼라 Node 가 직접 spawn 하지 못하고 cmd.exe 를 거쳐야 하는데,
+ * 그 경로는 따옴표 규칙이 까다롭다(실측에서 여기서 깨졌다).
+ * 같은 PC 에 `.exe` 와 `.cmd` 가 둘 다 있으면 `.exe` 를 쓰는 것이 언제나 낫다.
+ */
+function extRank(path: string): number {
+  const p = path.toLowerCase();
+  if (p.endsWith(".exe") || p.endsWith(".com")) return 0;
+  if (p.endsWith(".cmd") || p.endsWith(".bat")) return 2;
+  return 1;
+}
+
+/** PATH 를 훑어 후보를 모두 모은 뒤, 다루기 쉬운 것부터 고른다. */
 function fromPath(): string | null {
   const exts =
     process.platform === "win32"
       ? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD").split(";").map((e) => e.toLowerCase())
       : [""];
 
+  const found: string[] = [];
   for (const dir of (process.env.PATH ?? "").split(delimiter)) {
     if (!dir) continue;
     for (const ext of exts) {
       const candidate = join(dir, `claude${ext}`);
-      if (existsSync(candidate)) return candidate;
+      if (existsSync(candidate)) found.push(candidate);
     }
   }
-  return null;
+  if (found.length === 0) return null;
+  return found.sort((a, b) => extRank(a) - extRank(b))[0]!;
 }
 
 let cached: string | null | undefined;
@@ -71,7 +87,8 @@ export function resolveClaudeCli(): string | null {
     return cached;
   }
 
-  cached = fromPath() ?? knownLocations().find((p) => existsSync(p)) ?? null;
+  const known = knownLocations().filter((p) => existsSync(p));
+  cached = fromPath() ?? known.sort((a, b) => extRank(a) - extRank(b))[0] ?? null;
   return cached;
 }
 
@@ -83,6 +100,41 @@ export function searchedLocations(): string[] {
 /** 테스트용. 탐색 결과 캐시를 지운다. */
 export function resetClaudeCliCache(): void {
   cached = undefined;
+}
+
+/**
+ * 출력을 읽는다.
+ *
+ * Claude CLI 자체는 UTF-8 로 쓰지만, **cmd.exe 가 내는 오류 메시지는 OEM 코드페이지**다.
+ * UTF-8 로만 읽으면 한국어 Windows 에서 "'\"C:\\...\"'��(��) ���� ..." 처럼 깨져
+ * 사용자도 우리도 원인을 읽을 수 없다(실측).
+ */
+function decodeOutput(buf: Buffer): string {
+  const utf8 = buf.toString("utf8");
+  if (!utf8.includes("\uFFFD")) return utf8;
+  for (const enc of ["windows-949", "windows-1252"]) {
+    try {
+      return new TextDecoder(enc).decode(buf);
+    } catch {
+      /* 다음 후보로 */
+    }
+  }
+  return utf8;
+}
+
+/**
+ * 로그인 상태.
+ *
+ * `--version` 만 확인하면 **설치는 됐지만 로그인은 안 된** 상태를 통과시킨다.
+ * 그러면 QA 는 시작되고, 분석 요청마다 실패하며, 사용자는 이유를 모른 채
+ * 룰 결과만 받는다. `auth status --json` 은 API 호출 없이 이것을 알려준다.
+ */
+export interface ClaudeAuth {
+  loggedIn: boolean;
+  email: string | null;
+  plan: string | null;
+  /** 상태를 확인하지 못한 이유. 확인했으면 null */
+  error: string | null;
 }
 
 export interface CliResult {
@@ -102,7 +154,44 @@ export interface CliResult {
  * `.cmd` 래퍼는 Node 20+ 가 직접 spawn 하지 못하므로(보안 수정 후 EINVAL)
  * cmd.exe 를 거친다. 이때 명령줄에 올라가는 것은 **실행 파일 경로와 우리가 만든
  * 고정 인자뿐**이고, 프롬프트는 여전히 stdin 으로 간다.
+ *
+ * **cmd.exe 에는 인자를 Node 에게 맡기면 안 된다.** Node 는 따옴표를 `\\"` 로
+ * 이스케이프하는데 cmd 는 그 표기를 모른다. 실측에서 이렇게 나왔다.
+ *
+ *     '\\"C:\\Users\\...\\claude.cmd\\"' 은(는) 내부 또는 외부 명령... 아닙니다.
+ *
+ * 그래서 `windowsVerbatimArguments` 로 우리가 만든 명령줄을 그대로 넘기고,
+ * `/s` 규칙에 맞춰 **전체를 따옴표로 한 번 더 감싼다.**
  */
+export async function claudeAuthStatus(exe: string, timeoutMs = 20_000): Promise<ClaudeAuth> {
+  try {
+    const { stdout } = await runClaude(exe, ["auth", "status", "--json"], null, timeoutMs);
+    const parsed = JSON.parse(stdout) as {
+      loggedIn?: boolean;
+      email?: string;
+      subscriptionType?: string;
+      authMethod?: string;
+    };
+    return {
+      loggedIn: parsed.loggedIn === true,
+      email: parsed.email ?? null,
+      plan: parsed.subscriptionType ?? parsed.authMethod ?? null,
+      error: null,
+    };
+  } catch (err) {
+    /*
+     * 이 하위 명령이 없는 옛 버전일 수 있다. 그때는 "로그인 안 됨"이라고 단정하지 않는다 —
+     * 확인하지 못한 것과 확인해서 아닌 것은 다르다.
+     */
+    return {
+      loggedIn: false,
+      email: null,
+      plan: null,
+      error: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
 export function runClaude(
   exe: string,
   args: string[],
@@ -113,13 +202,17 @@ export function runClaude(
   const useShell = isWrapper && process.platform === "win32";
 
   const file = useShell ? (process.env.ComSpec ?? "cmd.exe") : exe;
-  const argv = useShell ? ["/d", "/s", "/c", `"${exe}" ${args.join(" ")}`] : args;
+  const argv = useShell ? ["/d", "/s", "/c", `""${exe}" ${args.join(" ")}"`] : args;
 
   return new Promise((resolve, reject) => {
-    const child = spawn(file, argv, { windowsHide: true, stdio: ["pipe", "pipe", "pipe"] });
+    const child = spawn(file, argv, {
+      windowsHide: true,
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsVerbatimArguments: useShell,
+    });
 
-    let stdout = "";
-    let stderr = "";
+    const outChunks: Buffer[] = [];
+    const errChunks: Buffer[] = [];
     let settled = false;
 
     const timer = setTimeout(() => {
@@ -129,12 +222,8 @@ export function runClaude(
       reject(new Error(`Claude CLI 응답이 ${Math.round(timeoutMs / 1000)}초를 넘었습니다.`));
     }, timeoutMs);
 
-    child.stdout.on("data", (d: Buffer) => {
-      stdout += d.toString("utf8");
-    });
-    child.stderr.on("data", (d: Buffer) => {
-      stderr += d.toString("utf8");
-    });
+    child.stdout.on("data", (d: Buffer) => outChunks.push(d));
+    child.stderr.on("data", (d: Buffer) => errChunks.push(d));
 
     child.on("error", (err) => {
       if (settled) return;
@@ -147,6 +236,8 @@ export function runClaude(
       if (settled) return;
       settled = true;
       clearTimeout(timer);
+      const stdout = decodeOutput(Buffer.concat(outChunks));
+      const stderr = decodeOutput(Buffer.concat(errChunks));
       if (code === 0) resolve({ stdout, stderr, code });
       else reject(new Error(`Claude CLI 가 종료 코드 ${code} 로 끝났습니다. ${stderr.trim()}`));
     });

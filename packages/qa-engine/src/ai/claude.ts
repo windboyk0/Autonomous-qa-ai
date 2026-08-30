@@ -1,4 +1,4 @@
-import { resolveClaudeCli, runClaude, searchedLocations } from "./claude-cli.js";
+import { claudeAuthStatus, resolveClaudeCli, runClaude, searchedLocations } from "./claude-cli.js";
 import { z } from "zod";
 import type {
   AiProvider,
@@ -78,10 +78,36 @@ export class ClaudeProvider implements AiProvider {
 
     try {
       const { stdout } = await runClaude(exe, ["--version"], null, 20_000);
+      const version = stdout.trim();
+
+      /*
+       * 설치 확인만으로는 부족하다. **로그인하지 않아도 `--version` 은 된다.**
+       * 그 상태로 QA 를 시작하면 분석 요청이 전부 실패하고, 사용자는 이유를 모른 채
+       * 룰 결과만 받는다. 여기서 걸러 무엇을 해야 하는지 알려준다.
+       */
+      const auth = await claudeAuthStatus(exe);
+      if (auth.error !== null) {
+        // 확인하지 못한 것을 "로그인 안 됨"으로 단정하지 않는다. 그대로 진행한다.
+        return {
+          ...base,
+          available: true,
+          detail: `Claude Code 연결됨 · ${version} (${exe}) · 로그인 상태는 확인하지 못했습니다`,
+        };
+      }
+      if (!auth.loggedIn) {
+        return {
+          ...base,
+          detail: "Claude Code 에 로그인되어 있지 않습니다.",
+          remediation:
+            "QA 설정 화면의 [Claude 로그인] 을 누르거나, 터미널에서 `claude auth login` 을 실행하세요.",
+        };
+      }
+
+      const who = [auth.plan, auth.email].filter(Boolean).join(" · ");
       return {
         ...base,
         available: true,
-        detail: `Claude Code 연결됨 · ${stdout.trim()} (${exe})`,
+        detail: `Claude Code 연결됨 · ${version}${who ? ` · ${who}` : ""}`,
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

@@ -17,6 +17,8 @@ const api = {
     pickFolder: () => ipcRenderer.invoke("dialog:pickFolder"),
   },
   ai: {
+    claudeStatus: () => ipcRenderer.invoke("ai:claudeStatus"),
+    claudeLogin: () => ipcRenderer.invoke("ai:claudeLogin"),
     ollamaModels: (baseUrl: string) => ipcRenderer.invoke("ai:ollamaModels", baseUrl),
   },
   run: {

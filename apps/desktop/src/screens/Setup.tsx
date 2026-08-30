@@ -47,6 +47,16 @@ export function Setup() {
   const [modelsLoading, setModelsLoading] = useState(false);
   const [modelsError, setModelsError] = useState<string | null>(null);
 
+  type ClaudeStatus = {
+    ok: boolean;
+    detail: string;
+    remediation: string | null;
+    needsLogin: boolean;
+    exe: string | null;
+  };
+  const [claude, setClaude] = useState<ClaudeStatus | null>(null);
+  const [claudeBusy, setClaudeBusy] = useState(false);
+
   /** 설치된 Ollama 모델을 가져온다. 실패해도 직접 입력할 수 있게 둔다. */
   const loadModels = async () => {
     setModelsLoading(true);
@@ -142,6 +152,30 @@ export function Setup() {
    * 버튼이 눌려도 조용히 아무 일도 하지 않았고, 사용자는 "버튼이 안 눌린다"고만
    * 알 수 있었다 (실측). 막는 것과 왜 막는지 말하는 것은 한 쌍이어야 한다.
    */
+  /**
+   * Claude 연결 확인.
+   *
+   * 예전에는 이것을 QA 가 다 끝난 뒤에야 알 수 있었다. 설정 화면에서 미리
+   * 확인할 수 있어야 "왜 AI 가 안 붙었지"를 4분 뒤에 묻지 않는다.
+   */
+  const checkClaude = async (): Promise<void> => {
+    setClaudeBusy(true);
+    try {
+      setClaude(await qa().ai.claudeStatus());
+    } finally {
+      setClaudeBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (provider !== "claude") {
+      setClaude(null);
+      return;
+    }
+    void checkClaude();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [provider]);
+
   const blockReason = ((): string | null => {
     if (preflightError) return `실행 환경을 확인하지 못했습니다: ${preflightError}`;
     if (!preflight) return "실행 환경을 확인하는 중입니다…";
@@ -158,6 +192,10 @@ export function Setup() {
     if (del && !deleteConsent) return "삭제 테스트에 동의해야 시작할 수 있습니다.";
     // 모델 없이 Ollama를 켜면 엔진이 헬스체크에서 떨어진다. 여기서 미리 막는다.
     if (provider === "ollama" && !model.trim()) return "사용할 Ollama 모델을 선택하세요.";
+    // 로그인하지 않은 채로 시작하면 분석이 전부 실패하고 룰 결과만 남는다.
+    if (provider === "claude" && claude !== null && !claude.ok) {
+      return claude.remediation ? `${claude.detail} ${claude.remediation}` : claude.detail;
+    }
     return null;
   })();
 
@@ -430,6 +468,53 @@ export function Setup() {
             <option value="claude">Claude Max</option>
           </select>
         </label>
+        {provider === "claude" && (
+          <div className="mt-2">
+            {claudeBusy && <p className="hint">Claude Code 연결을 확인하는 중…</p>}
+            {!claudeBusy && claude !== null && (
+              <div
+                className={claude.ok ? "alert-ok" : "alert-warn"}
+                data-testid="claude-status"
+              >
+                <b>{claude.ok ? "연결됨" : "연결되지 않음"}</b>
+                <div className="mt-1">{claude.detail}</div>
+                {claude.remediation && <div className="mt-1">{claude.remediation}</div>}
+                <div className="mt-2 flex gap-2">
+                  {/*
+                    로그인은 브라우저를 열고 사용자 입력을 기다리는 대화형 명령이라
+                    앱 안에서 대신 해 줄 수 없다. 창을 띄워 주고, 끝나면 다시 확인한다.
+                  */}
+                  {!claude.ok && (
+                    <button
+                      className="btn-primary"
+                      data-testid="claude-login"
+                      onClick={() => {
+                        void (async () => {
+                          const r = await qa().ai.claudeLogin();
+                          if (!r.ok) setError(r.error ?? "로그인 창을 열지 못했습니다.");
+                        })();
+                      }}
+                    >
+                      Claude 로그인
+                    </button>
+                  )}
+                  <button
+                    className="btn-ghost"
+                    disabled={claudeBusy}
+                    data-testid="claude-recheck"
+                    onClick={() => void checkClaude()}
+                  >
+                    다시 확인
+                  </button>
+                </div>
+              </div>
+            )}
+            <p className="hint">
+              앱에 API 키를 넣지 않습니다. 이 PC 에 설치된 Claude Code 의 로그인을 그대로 씁니다.
+            </p>
+          </div>
+        )}
+
         {provider === "ollama" && (
           <>
             <label>
