@@ -198,9 +198,30 @@ label.row input[type="checkbox"] {
   word-break: break-all;
 }
 
-/** 로그 옆에 붙는 목록. 로그와 높이를 맞춰 스크롤한다. */
+/*
+ * Monitor 왼쪽 열. 카드를 세로로 쌓고 마지막 카드가 남은 높이를 먹는다.
+ * 고정 높이를 주면 오른쪽 스크린샷 크기에 따라 빈칸이 생기거나 넘친다.
+ */
+.mon-left {
+  display: flex;
+  flex-direction: column;
+}
+.mon-left .grow-card {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/*
+ * 탐색한 화면 목록. 카드 안에서 남은 높이만큼만 차지하고 나머지는 스크롤한다.
+ * height 를 0 으로 못박지 않으면 항목이 늘어난 만큼 열 자체가 길어져
+ * 빈칸을 메우는 대신 오른쪽 열보다 아래로 삐져나간다.
+ */
 .side-list {
-  height: 460px;
+  flex: 1 1 auto;
+  height: 0;
+  min-height: 160px;
   overflow: auto;
 }
 .log-warn {

@@ -130,7 +130,7 @@ export function Monitor() {
       )}
 
       <div className="grid grid-cols-3 gap-4">
-        <div className="col-span-1 space-y-4">
+        <div className="col-span-1 space-y-4 mon-left">
           <div className="card">
             <h2>진행</h2>
             <dl className="stat">
@@ -162,6 +162,16 @@ export function Monitor() {
               <dd>{counts.low}</dd>
             </dl>
           </div>
+
+          {/* 왼쪽 열 아래는 비어 있었다. 목록을 여기 붙이고 로그는 오른쪽 폭을 다 쓴다. */}
+          <div className="card grow-card">
+            <h2>탐색한 화면 ({visitedScreens.length})</h2>
+            <ol className="list side-list" data-testid="visited-list">
+              {visitedScreens.map((s, i) => (
+                <li key={i}>{s.name}</li>
+              ))}
+            </ol>
+          </div>
         </div>
 
         <div className="col-span-2 space-y-4">
@@ -174,26 +184,14 @@ export function Monitor() {
             )}
           </div>
 
-          {/* 로그와 탐색 목록을 나란히 둔다. 로그를 보며 어느 화면에서 났는지 같이 확인한다. */}
-          <div className="grid grid-cols-3 gap-4">
-            <div className="card col-span-2">
-              <h2>로그</h2>
-              <div className="log" ref={logRef} data-testid="log-box">
-                {logs.map((l, i) => (
-                  <div key={i} className={`log-${l.level}`}>
-                    [{l.level}] {l.message}
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="card col-span-1">
-              <h2>탐색한 화면 ({visitedScreens.length})</h2>
-              <ol className="list side-list" data-testid="visited-list">
-                {visitedScreens.map((s, i) => (
-                  <li key={i}>{s.name}</li>
-                ))}
-              </ol>
+          <div className="card">
+            <h2>로그</h2>
+            <div className="log" ref={logRef} data-testid="log-box">
+              {logs.map((l, i) => (
+                <div key={i} className={`log-${l.level}`}>
+                  [{l.level}] {l.message}
+                </div>
+              ))}
             </div>
           </div>
         </div>
