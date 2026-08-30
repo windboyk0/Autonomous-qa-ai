@@ -1,6 +1,6 @@
 {
   "name": "autonomous-qa-ai",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "private": true,
   "description": "Electron 기반 관리자웹 자율 QA 테스트 시스템",
   "engines": {

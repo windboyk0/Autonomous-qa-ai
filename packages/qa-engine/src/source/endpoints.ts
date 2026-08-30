@@ -9,6 +9,8 @@
  * (실측: `권한관리` 16회 발견 / 0회 실행)
  */
 
+import { NO_SECURITY_RULES, isPubliclyPermitted, type SecurityRules } from "./security-config.js";
+
 export interface ExtractedEndpoint {
   method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "ANY";
   /** 실행 QA 의 pathTemplate 과 맞추기 위해 `{id}` 를 `:id` 로 정규화한 형태 */
@@ -17,8 +19,10 @@ export interface ExtractedEndpoint {
   /** 핸들러 메서드가 선언된 줄 */
   line: number;
   symbol: string;
-  /** 권한 검사 애너테이션이 붙어 있는가 */
+  /** 권한 검사 애너테이션이 붙어 있는가 (클래스 레벨 포함) */
   authorized: boolean;
+  /** 클래스 레벨 애너테이션으로 보호되는가. 메서드에는 없어도 된다. */
+  authorizedByClass: boolean;
   framework: "spring";
 }
 
@@ -52,6 +56,27 @@ export function extractSpringEndpoints(file: string, text: string): ExtractedEnd
 
   const lines = text.split(/\r?\n/);
   const out: ExtractedEndpoint[] = [];
+
+  /*
+   * 클래스 레벨 권한.
+   *
+   * **이것을 놓치면 오탐이 쏟아진다.** 실측에서 `@PreAuthorize` 를 클래스에 한 번
+   * 걸어 둔 컨트롤러의 엔드포인트가 전부 "권한 검사 없음" 으로 보고됐다
+   * (AdminController·WorkScheduleController·CompanyController 에서 12건).
+   * 메서드마다 다시 붙이지 않는 것이 오히려 정상적인 작성법이다.
+   */
+  let classAuthorized = false;
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!AUTHZ.test(lines[i]!)) continue;
+    // 이 애너테이션 아래로 class 선언이 먼저 나오면 클래스 레벨이다.
+    for (let j = i + 1; j < Math.min(i + 8, lines.length); j += 1) {
+      const l = lines[j]!.trim();
+      if (l === "" || l.startsWith("@") || l.startsWith("//") || l.startsWith("*")) continue;
+      if (/\bclass\s+\w+/.test(l)) classAuthorized = true;
+      break;
+    }
+    if (classAuthorized) break;
+  }
 
   // 클래스 레벨 경로. @RestController 위아래의 @RequestMapping 을 찾는다.
   let base = "";
@@ -102,7 +127,7 @@ export function extractSpringEndpoints(file: string, text: string): ExtractedEnd
      * 핸들러 선언 줄부터 위로 올라가며 애너테이션·주석·빈 줄이 이어지는 동안만 본다.
      * 그 위의 다른 메서드까지 넘어가면 남의 애너테이션을 제 것으로 착각한다.
      */
-    let authorized = false;
+    let authorized = classAuthorized;
     for (let j = declLine - 2; j >= 0; j -= 1) {
       const l = lines[j]!.trim();
       if (l === "" || l.startsWith("//") || l.startsWith("*") || l.startsWith("/*")) continue;
@@ -123,6 +148,7 @@ export function extractSpringEndpoints(file: string, text: string): ExtractedEnd
       line: declLine,
       symbol,
       authorized,
+      authorizedByClass: classAuthorized,
       framework: "spring",
     });
     i = declLine - 1;
@@ -130,6 +156,13 @@ export function extractSpringEndpoints(file: string, text: string): ExtractedEnd
 
   return out;
 }
+
+/** 권한 검사가 빠졌을 때 그것이 실제로 무엇을 뜻하는가. */
+export type AuthzGap =
+  /** 인증도 역할도 없다. 아무나 호출할 수 있다. */
+  | "open"
+  /** 인증은 강제되지만 역할 제한이 없다. 로그인한 사람은 누구나 호출할 수 있다. */
+  | "no-role-check";
 
 /**
  * 권한 검사가 빠진 엔드포인트를 고른다.
@@ -140,7 +173,10 @@ export function extractSpringEndpoints(file: string, text: string): ExtractedEnd
  * 그때 전부를 결함으로 올리면 오탐이 쏟아진다.
  * 형제 중 일부만 빠진 것은 다르다 — 그것은 **빠뜨린 것**이다.
  */
-export function unauthorizedEndpoints(endpoints: ExtractedEndpoint[]): ExtractedEndpoint[] {
+export function unauthorizedEndpoints(
+  endpoints: ExtractedEndpoint[],
+  rules: SecurityRules = NO_SECURITY_RULES,
+): Array<{ endpoint: ExtractedEndpoint; gap: AuthzGap }> {
   const byFile = new Map<string, ExtractedEndpoint[]>();
   for (const e of endpoints) {
     const list = byFile.get(e.file) ?? [];
@@ -148,10 +184,25 @@ export function unauthorizedEndpoints(endpoints: ExtractedEndpoint[]): Extracted
     byFile.set(e.file, list);
   }
 
-  const out: ExtractedEndpoint[] = [];
+  const out: Array<{ endpoint: ExtractedEndpoint; gap: AuthzGap }> = [];
   for (const list of byFile.values()) {
     if (!list.some((e) => e.authorized)) continue;
-    out.push(...list.filter((e) => !e.authorized));
+    for (const endpoint of list) {
+      if (endpoint.authorized) continue;
+
+      /*
+       * 의도적으로 열어 둔 경로는 결함이 아니다.
+       * 설계 결정을 버그라고 부르면 리포트 전체의 신뢰가 깎인다.
+       * (실측: `GET /api/v1/logo/**` 가 permitAll 인데 CRITICAL 로 올라왔다)
+       */
+      if (isPubliclyPermitted(endpoint.method, endpoint.path, rules).permitted) continue;
+
+      out.push({
+        endpoint,
+        // 전역으로 인증이 강제되면 "아무나"가 아니라 "로그인한 누구나"다.
+        gap: rules.authenticatedByDefault ? "no-role-check" : "open",
+      });
+    }
   }
   return out;
 }

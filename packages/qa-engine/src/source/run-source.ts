@@ -6,7 +6,14 @@ import { sha1 } from "../normalize.js";
 import type { RunContext } from "../run-context.js";
 import { scanProject, type ProjectScan } from "./scan.js";
 import { isSecretKey, readYamlKeyPaths, readConfigKeys } from "./secrets.js";
-import { extractSpringEndpoints, isMutating, unauthorizedEndpoints, type ExtractedEndpoint } from "./endpoints.js";
+import {
+  extractSpringEndpoints,
+  isMutating,
+  unauthorizedEndpoints,
+  type AuthzGap,
+  type ExtractedEndpoint,
+} from "./endpoints.js";
+import { readSecurityConfig, type SecurityRules } from "./security-config.js";
 import { runFileRules, type SourceFinding } from "./rules.js";
 import { runBuildAndTest, type CommandResult } from "./build-test.js";
 
@@ -79,6 +86,11 @@ function findingToCandidate(f: SourceFinding, evidenceId: string): IssueCandidat
  * **값을 읽지 않는다** (CLAUDE.md §16-1). 키 이름과 값의 *모양*만 본다.
  * `${DB_PASSWORD}` 처럼 환경변수를 참조하면 정상이므로 걸러진다.
  */
+/** `src/test/` 아래인가. 테스트 설정은 운영 설정과 무게가 다르다. */
+function isTestScope(path: string): boolean {
+  return /(^|\/)(src\/test|test|tests|__tests__|spec)\//i.test(path);
+}
+
 function configSecretFindings(rootDir: string, scan: ProjectScan): SourceFinding[] {
   const out: SourceFinding[] = [];
 
@@ -108,11 +120,21 @@ function configSecretFindings(rootDir: string, scan: ProjectScan): SourceFinding
         description:
           `${file.path} 의 \`${k.key}\` 가 환경변수 참조가 아니라 값을 직접 담고 있습니다. ` +
           "값은 읽지 않았습니다 — 키 이름과 값의 모양만으로 판정했습니다.",
-        severity: /prod|production|live/i.test(file.path) ? "HIGH" : "MEDIUM",
+        /*
+         * 테스트 설정의 더미 값을 운영 자격증명과 같은 무게로 올리면 안 된다.
+         * `src/test/` 아래는 CI 에서 쓰는 고정값인 것이 보통이다(실측에서 여기서 3건).
+         */
+        severity: isTestScope(file.path)
+          ? "LOW"
+          : /prod|production|live/i.test(file.path)
+            ? "HIGH"
+            : "MEDIUM",
         file: file.path,
         line: k.line,
         symbol: k.key,
-        impact: "저장소에 접근할 수 있는 모든 사람이 운영 자격증명을 갖게 됩니다.",
+        impact: isTestScope(file.path)
+          ? "테스트 전용 설정입니다. 값이 운영과 같다면 그때는 실제 위험이 됩니다."
+          : "저장소에 접근할 수 있는 모든 사람이 운영 자격증명을 갖게 됩니다.",
         recommendation:
           "환경변수나 비밀 저장소로 옮기고, 이미 커밋된 값은 폐기·재발급하세요.",
       });
@@ -121,19 +143,46 @@ function configSecretFindings(rootDir: string, scan: ProjectScan): SourceFinding
   return out;
 }
 
-/** 권한 검사가 빠진 엔드포인트를 후보로 바꾼다. */
-function authzCandidates(open: ExtractedEndpoint[], evidenceId: string): IssueCandidate[] {
-  return open.map((e) =>
-    candidateOf({
-      ruleId: "SRC-AUTHZ-MISSING",
-      title: `권한 검사가 없는 엔드포인트: ${e.method} ${e.path}`,
+/**
+ * 권한 검사가 빠진 엔드포인트를 후보로 바꾼다.
+ *
+ * **빠졌다는 사실과 그것이 뜻하는 바는 다르다.**
+ * 전역으로 인증이 강제되는 프로젝트에서 애너테이션이 없다는 것은
+ * "아무나 호출 가능"이 아니라 "로그인한 누구나 호출 가능"이다.
+ * 둘을 같은 CRITICAL 로 올렸더니 실측에서 28건 대부분이 과장이었다.
+ */
+function authzCandidates(
+  gaps: Array<{ endpoint: ExtractedEndpoint; gap: AuthzGap }>,
+  rules: SecurityRules,
+  evidenceId: string,
+): IssueCandidate[] {
+  return gaps.map(({ endpoint: e, gap }) => {
+    const open = gap === "open";
+    const where = rules.file ? ` (${rules.file})` : "";
+
+    return candidateOf({
+      ruleId: open ? "SRC-AUTHZ-MISSING" : "SRC-AUTHZ-NO-ROLE",
+      title: open
+        ? `권한 검사가 없는 엔드포인트: ${e.method} ${e.path}`
+        : `역할 제한이 없는 엔드포인트: ${e.method} ${e.path}`,
       description:
         `${e.file} 의 \`${e.symbol}\` 에 권한 애너테이션이 없습니다. ` +
         "같은 컨트롤러의 다른 엔드포인트에는 있습니다 — 일괄 정책이 아니라 빠뜨린 것으로 보입니다.\n\n" +
-        "영향: 인증만 통과하면 권한이 없는 사용자도 이 기능을 호출할 수 있습니다.\n" +
-        "권장: 형제 엔드포인트와 같은 권한 애너테이션을 붙이고, 서비스 계층에서도 한 번 더 확인하세요.\n\n" +
+        (open
+          ? "영향: 인증 여부도 확인되지 않아 누구든 이 기능을 호출할 수 있습니다.\n"
+          : `영향: 인증은 전역 설정으로 강제되므로${where} 로그인하지 않은 사람은 막힙니다. ` +
+            "다만 역할 제한이 없어 로그인한 사용자라면 누구나 호출할 수 있습니다. " +
+            "본인 자원만 다루는 엔드포인트라면 의도된 것일 수 있으니 확인이 필요합니다.\n") +
+        "권장: 형제 엔드포인트와 같은 권한 애너테이션을 붙이거나, 의도한 것이라면 " +
+        "isAuthenticated() 로 명시해 다음 사람이 헷갈리지 않게 하세요.\n\n" +
         "이 결함은 실행 QA로는 찾을 수 없습니다. 위험 액션은 차단하는 것이 정답이라 실행되지 않기 때문입니다.",
-      severity: isMutating(e.method) ? "CRITICAL" : "HIGH",
+      severity: open
+        ? isMutating(e.method)
+          ? "CRITICAL"
+          : "HIGH"
+        : isMutating(e.method)
+          ? "HIGH"
+          : "MEDIUM",
       screenName: e.file,
       codeRefs: [
         {
@@ -145,8 +194,8 @@ function authzCandidates(open: ExtractedEndpoint[], evidenceId: string): IssueCa
         },
       ],
       evidenceId,
-    }),
-  );
+    });
+  });
 }
 
 export function runSourceQa(
@@ -224,9 +273,23 @@ export function runSourceQa(
    */
   const build = runBuildAndTest(config, scan, evidenceId);
 
-  const open = unauthorizedEndpoints(endpoints);
+  /*
+   * 애너테이션만 보고 판단하면 안 된다. SecurityConfig 가 전역 규칙을 정하고 있고,
+   * permitAll 로 열어 둔 경로는 의도적인 공개다.
+   */
+  const rules = readSecurityConfig(rootDir, scan);
+  if (rules.found) {
+    log(
+      "info",
+      "보안 설정: " + rules.file + " · 기본 " +
+        (rules.authenticatedByDefault ? "인증 필요" : "규칙 없음") +
+        " · 공개 경로 " + rules.publicMatchers.length + "개",
+    );
+  }
+
+  const open = unauthorizedEndpoints(endpoints, rules);
   const candidates = [
-    ...authzCandidates(open, evidenceId),
+    ...authzCandidates(open, rules, evidenceId),
     ...findings.map((f) => findingToCandidate(f, evidenceId)),
     ...build.candidates,
   ];

@@ -47,8 +47,22 @@ export function accessOf(relativePath: string): FileAccess {
   return "read";
 }
 
+/**
+ * 이름에 token·secret 이 들어가도 자격증명이 아닌 키들.
+ *
+ * 실측에서 `jwt.access-token-expire-seconds`, `jwt.refresh-token-expire-days` 가
+ * "평문 자격증명"으로 보고됐다. 숫자로 된 유효기간 설정이다.
+ * 이런 것을 결함이라고 하면 진짜 결함이 묻힌다.
+ */
+const NOT_A_SECRET =
+  /(expire|expiry|expiration|ttl|timeout|duration|seconds|minutes|hours|days|size|length|count|enabled|disabled|header|prefix|issuer|audience|algorithm|type|url|uri|endpoint|path|name|rotation|interval)/i;
+
 export function isSecretKey(key: string): boolean {
-  return SECRET_KEY.test(key);
+  if (!SECRET_KEY.test(key)) return false;
+  // 마지막 마디가 설정값이면 자격증명이 아니다. `jwt.secret` 은 남고
+  // `jwt.secret-rotation-days` 는 걸러진다.
+  const last = key.split(".").pop() ?? key;
+  return !NOT_A_SECRET.test(last);
 }
 
 /** 설정 파일에서 뽑아낸 키 하나. **값은 담지 않는다.** */

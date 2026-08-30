@@ -354,3 +354,127 @@ describe("Phase 9 — SQL 룰 정밀도", () => {
     expect(findSqlConcat("x.java", text).length).toBe(1);
   });
 });
+
+/**
+ * 실측 회귀 — 실제 관리자웹 프로젝트에 돌렸더니 권한 검사 누락 28건이 나왔고
+ * 그중 대부분이 오탐이었다. 세 가지 원인을 각각 잠근다.
+ */
+describe("Phase 9 — 권한 판정 정밀도", () => {
+  const CLASS_LEVEL = `
+    @RestController
+    @RequestMapping("/api/v1/admin")
+    @PreAuthorize("hasAnyRole('MANAGER', 'HR_ADMIN')")
+    public class AdminController {
+      @GetMapping("/dashboard")
+      public String dashboard() { return null; }
+
+      @GetMapping("/daily")
+      @PreAuthorize("isAuthenticated()")
+      public String daily() { return null; }
+    }`;
+
+  /** 12건이 여기서 나왔다. 클래스에 한 번 걸어 두는 것이 오히려 정상적인 작성법이다. */
+  it("클래스 레벨 @PreAuthorize 가 메서드를 덮는다", async () => {
+    const { extractSpringEndpoints, unauthorizedEndpoints } = await import("./source/endpoints.js");
+    const eps = extractSpringEndpoints("AdminController.java", CLASS_LEVEL);
+
+    expect(eps.length).toBe(2);
+    expect(eps.every((e) => e.authorized)).toBe(true);
+    expect(eps.every((e) => e.authorizedByClass)).toBe(true);
+    expect(unauthorizedEndpoints(eps)).toEqual([]);
+  });
+
+  it("permitAll 로 열어 둔 경로는 결함이 아니다", async () => {
+    const { extractSpringEndpoints, unauthorizedEndpoints } = await import("./source/endpoints.js");
+    const { readSecurityConfig } = await import("./source/security-config.js");
+    const { mkdtempSync, mkdirSync, writeFileSync: write, rmSync: rm } = await import("node:fs");
+    const { scanProject } = await import("./source/scan.js");
+
+    const dir = mkdtempSync(join(tmpdir(), "qa-sec-"));
+    mkdirSync(join(dir, "config"), { recursive: true });
+    write(
+      join(dir, "config", "SecurityConfig.java"),
+      `class SecurityConfig {
+         void f(HttpSecurity http) {
+           http.authorizeHttpRequests(a -> a
+             .requestMatchers(HttpMethod.GET, "/api/v1/logo/**").permitAll()
+             .anyRequest().authenticated());
+         }
+       }`,
+      "utf8",
+    );
+    const rules = readSecurityConfig(
+      dir,
+      scanProject(dir, { maxFiles: 100, maxFileBytes: 512 * 1024, maxTotalBytes: 1024 * 1024 }),
+    );
+    expect(rules.found).toBe(true);
+    expect(rules.authenticatedByDefault).toBe(true);
+
+    const eps = extractSpringEndpoints(
+      "LogoController.java",
+      `@RestController
+       @RequestMapping("/api/v1/logo")
+       class LogoController {
+         @GetMapping("/{type}")
+         public String get() { return null; }
+         @PostMapping
+         @PreAuthorize("hasRole('SYSTEM_ADMIN')")
+         public String upload() { return null; }
+       }`,
+    );
+    expect(unauthorizedEndpoints(eps, rules)).toEqual([]);
+    rm(dir, { recursive: true, force: true });
+  });
+
+  /**
+   * 전역 인증이 강제되면 "아무나"가 아니라 "로그인한 누구나"다.
+   * 둘을 같은 CRITICAL 로 올리면 진짜 구멍이 묻힌다.
+   */
+  it("전역 인증이 있으면 심각도를 낮추고 문장을 바꾼다", async () => {
+    const { extractSpringEndpoints, unauthorizedEndpoints } = await import("./source/endpoints.js");
+    const eps = extractSpringEndpoints(
+      "UserController.java",
+      `@RestController
+       @RequestMapping("/api/v1/users")
+       class UserController {
+         @GetMapping
+         @PreAuthorize("isAuthenticated()")
+         public String list() { return null; }
+         @PostMapping("/me/devices")
+         public String register() { return null; }
+       }`,
+    );
+
+    const open = unauthorizedEndpoints(eps, {
+      found: true,
+      file: "SecurityConfig.java",
+      authenticatedByDefault: false,
+      publicMatchers: [],
+    });
+    expect(open[0]!.gap).toBe("open");
+
+    const guarded = unauthorizedEndpoints(eps, {
+      found: true,
+      file: "SecurityConfig.java",
+      authenticatedByDefault: true,
+      publicMatchers: [],
+    });
+    expect(guarded[0]!.gap).toBe("no-role-check");
+  });
+});
+
+/** 이름에 token 이 들어간다고 자격증명은 아니다. */
+describe("Phase 9 — 시크릿 키 판정", () => {
+  it.each([
+    ["jwt.secret", true],
+    ["spring.datasource.password", true],
+    ["aws.secretAccessKey", true],
+    ["jwt.access-token-expire-seconds", false],
+    ["jwt.refresh-token-expire-days", false],
+    ["auth.token-header", false],
+    ["security.token.enabled", false],
+  ])("%s → 자격증명 %s", async (key, expected) => {
+    const { isSecretKey } = await import("./source/secrets.js");
+    expect(isSecretKey(key)).toBe(expected);
+  });
+});
