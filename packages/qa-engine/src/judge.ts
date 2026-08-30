@@ -278,6 +278,8 @@ export function judge(candidates: IssueCandidate[], graph: StateGraph): JudgeRes
       title: first.title,
       source: first.source,
       codeRefs,
+      // 같은 결함으로 묶인 후보들은 같은 API 다. 첫 번째 것을 그대로 쓴다.
+      apiRef: first.apiRef,
       ruleId: first.ruleId,
       severity,
       screens,

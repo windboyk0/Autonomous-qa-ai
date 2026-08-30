@@ -21,6 +21,7 @@ import { Explorer, makeStartPlan, type ExploreResult } from "./explorer.js";
 import { judge } from "./judge.js";
 import { runSourceQa, type SourceQaOutcome } from "./source/run-source.js";
 import { computeImpact, gitChangedFiles, type ChangeImpact } from "./source/change-impact.js";
+import { attachCodeRefs, buildApiIndex } from "./source/api-map.js";
 import { scanProject } from "./source/scan.js";
 import { renderReport } from "./report.js";
 import { AiGuard, createProvider, enrich, passthrough, type EnrichResult } from "./ai/index.js";
@@ -447,11 +448,36 @@ export async function runQa(
       `Issue 확정: 후보 ${judged.mergedFrom}건 → Issue ${judged.issues.length}건`,
     );
 
+    /*
+     * 통합 모드의 본론.
+     *
+     * 실행 QA 가 본 것은 `POST /api/users → 500` 뿐이다. 그것을 컨트롤러
+     * 파일·줄로 옮기는 것이 이 도구의 차별점이다. **AI 보강보다 먼저** 한다 —
+     * 모델에게 소스 위치를 알려주고 원인을 묻는 것과, 모르는 채로 묻는 것은 다르다.
+     */
+    let mapping: { mapped: number; unmapped: string[] } | null = null;
+    let issuesForAi = judged.issues;
+    if (sourceOutcome) {
+      const index = buildApiIndex(
+        config.source.rootDir,
+        sourceOutcome.endpoints,
+        sourceOutcome.scan.files,
+      );
+      const attached = attachCodeRefs(judged.issues, index);
+      issuesForAi = attached.issues;
+      mapping = { mapped: attached.mapped, unmapped: attached.unmapped };
+      log(
+        "info",
+        `API→소스 매핑: ${attached.mapped}건 연결` +
+          (attached.unmapped.length > 0 ? ` · 못 찾음 ${attached.unmapped.length}건` : ""),
+      );
+    }
+
     // ── AI 보강 ───────────────────────────────────────────────────────
     // 탐색이 끝난 뒤에만 돈다. 여기서 무슨 일이 나도 위의 judged.issues는 그대로다.
     const enriched = await enrichWithAi({
       config,
-      issues: judged.issues,
+      issues: issuesForAi,
       explored,
       evidences: ctx.listEvidences(),
       makeProvider: options.createProvider ?? createProvider,
@@ -470,7 +496,20 @@ export async function runQa(
       issues: enriched.issues,
       ai: enriched,
       crud: crudOutcome.results,
-      source: sourceOutcome,
+      source: sourceOutcome
+        ? {
+            ...sourceOutcome,
+            unverified: [
+              ...sourceOutcome.unverified,
+              // 소스 위치를 못 찾은 것도 "안 본 것"이다. 조용히 넘어가지 않는다.
+              ...(mapping && mapping.unmapped.length > 0
+                ? [
+                    `아래 요청은 소스에서 대응하는 핸들러를 찾지 못했습니다: ${mapping.unmapped.join(", ")}`,
+                  ]
+                : []),
+            ],
+          }
+        : null,
       impact,
       leftovers: leftovers.map((r) => `${r.marker} (${r.screen}) — ${r.cleanupError ?? "사유 미상"}`),
       stopped: options.control?.stopped ?? false,

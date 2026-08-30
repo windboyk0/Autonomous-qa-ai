@@ -134,6 +134,7 @@ export async function enrich(input: {
           evidenceIds: i.evidenceIds,
           // 판정에 소스 위치는 필요 없다. 넘기지 않는 편이 AI 로 나가는 것을 줄인다.
           codeRefs: [],
+          apiRef: null,
           aiRationale: null,
           detectedAt: new Date().toISOString(),
         })),

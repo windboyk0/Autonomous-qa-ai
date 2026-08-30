@@ -36,6 +36,7 @@ function candidate(input: {
   dedupKey: string;
   evidenceId: string | undefined;
   screen: ScreenContext;
+  apiRef?: IssueCandidate["apiRef"];
 }): IssueCandidate | null {
   // 증적 없는 후보는 만들지 않는다. 리포트에서 근거를 댈 수 없다.
   if (!input.evidenceId) return null;
@@ -45,6 +46,7 @@ function candidate(input: {
     source: input.source,
     // 실행 증적에서 나온 결함이라 소스 위치를 모른다. 통합 QA 가 매핑해 채운다.
     codeRefs: [],
+    apiRef: input.apiRef ?? null,
     ruleId: input.ruleId,
     title: input.title,
     description: input.description,
@@ -164,6 +166,7 @@ export function detectNetwork(entries: NetworkEntry[], screen: ScreenContext): I
             `브라우저 사유: ${e.failureText}\n${note}`,
           severity,
           dedupKey: sha1(`network|${ruleId}|${e.endpointTemplate}|none`),
+          apiRef: { method: e.method, endpointTemplate: e.endpointTemplate, status: e.status ?? null },
           evidenceId,
           screen,
         }),
@@ -182,6 +185,7 @@ export function detectNetwork(entries: NetworkEntry[], screen: ScreenContext): I
             description: `${where} 응답에 ${e.durationMs}ms가 걸렸습니다 (기준 ${SLOW_MS}ms).`,
             severity: "LOW",
             dedupKey: sha1(`network|NET-SLOW|${e.endpointTemplate}|${status}`),
+            apiRef: { method: e.method, endpointTemplate: e.endpointTemplate, status: e.status ?? null },
             evidenceId,
             screen,
           }),
@@ -214,6 +218,7 @@ export function detectNetwork(entries: NetworkEntry[], screen: ScreenContext): I
         description: `${where} 요청이 HTTP ${status}${e.statusText ? ` ${e.statusText}` : ""}를 반환했습니다.`,
         severity,
         dedupKey: sha1(`network|${ruleId}|${e.endpointTemplate}|${status}`),
+        apiRef: { method: e.method, endpointTemplate: e.endpointTemplate, status: e.status ?? null },
         evidenceId,
         screen,
       }),

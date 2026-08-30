@@ -41,6 +41,8 @@ function candidateOf(input: {
   return {
     id: `src-${String(seq).padStart(4, "0")}`,
     source: "source",
+    // 소스에서 직접 찾은 결함이라 특정 요청에서 난 것이 아니다.
+    apiRef: null,
     ruleId: input.ruleId,
     title: input.title,
     description: input.description,

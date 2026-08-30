@@ -97,6 +97,7 @@ function candidate(input: {
     id: `crud-${String(candidateSeq).padStart(4, "0")}`,
     source: "crud",
     codeRefs: [],
+    apiRef: null,
     ruleId: input.ruleId,
     title: input.title,
     description: input.description,

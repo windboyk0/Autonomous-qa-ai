@@ -24,6 +24,20 @@ export const IssueSource = z.enum([
  * 컨트롤러는 1.0 이고, 호출 그래프를 추정해 얻은 서비스·리포지터리는 그보다 낮다.
  * 이것을 구분하지 않으면 리포트가 추측을 사실처럼 말하게 된다.
  */
+/**
+ * 이 결함이 어느 API 요청에서 났는가.
+ *
+ * 제목 문자열을 파싱해 알아내면 제목을 한 번 다듬을 때마다 매핑이 조용히 깨진다.
+ * 관측한 사실을 그대로 필드로 들고 다닌다.
+ */
+export const ApiRef = z.object({
+  method: z.string(),
+  /** 숫자·UUID 세그먼트가 :id 로 정규화된 경로 */
+  endpointTemplate: z.string(),
+  status: z.number().int().nullable().default(null),
+});
+export type ApiRef = z.infer<typeof ApiRef>;
+
 export const CodeRef = z.object({
   /** 프로젝트 루트 기준 상대 경로. 절대 경로는 남기지 않는다(사용자 폴더 구조 노출). */
   file: z.string(),
@@ -58,6 +72,8 @@ export const IssueCandidate = z.object({
   evidenceIds: z.array(z.string()).min(1),
   /** 소스 위치. 실행 QA 결함은 비어 있고, 통합 QA 에서 채워질 수 있다. */
   codeRefs: z.array(CodeRef).default([]),
+  /** 네트워크에서 온 결함이면 어느 요청이었는지. 소스 매핑의 입력이 된다. */
+  apiRef: ApiRef.nullable().default(null),
   /** 룰이 아니라 AI가 만든 후보인 경우 근거 문장 */
   aiRationale: z.string().nullable().default(null),
   detectedAt: z.string().datetime(),
@@ -94,6 +110,8 @@ export const Issue = z.object({
   evidenceIds: z.array(z.string()).min(1),
   /** 소스 위치. 실행 QA 결함은 비어 있고, 통합 QA 에서 채워질 수 있다. */
   codeRefs: z.array(CodeRef).default([]),
+  /** 네트워크에서 온 결함이면 어느 요청이었는지. 소스 매핑의 입력이 된다. */
+  apiRef: ApiRef.nullable().default(null),
   /** 이 Issue로 병합된 후보 수 = 발생 빈도 */
   occurrenceCount: z.number().int().positive(),
   dedupKey: z.string(),
