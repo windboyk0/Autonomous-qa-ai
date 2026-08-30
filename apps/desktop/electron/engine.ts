@@ -59,32 +59,62 @@ export function resolveBrowsersPath(): string | null {
   return null;
 }
 
-/** 설정을 CLI 인자로 바꾼다. 비밀번호는 인자에 넣지 않는다 — 환경변수로 간다. */
+/**
+ * 설정을 CLI 인자로 바꾼다. 비밀번호는 인자에 넣지 않는다 — 환경변수로 간다.
+ *
+ * **모드가 요구하는 것만 넘긴다.** 예전에는 `--url` 을 무조건 넘겼는데,
+ * 소스 QA 에는 URL 이 없어 빈 문자열이 갔고 엔진은 "대상이 없다"며 USAGE 를 뿌리고
+ * 종료 코드 2 로 끝났다(실측). 화면에는 "엔진이 비정상 종료했습니다" 만 보였다.
+ *
+ * 엔진은 `--url` / `--source` 중 **무엇을 줬는지로 모드를 정한다.**
+ * 그러니 여기서도 모드를 따로 넘기지 않고 필요한 것만 넣는다.
+ */
 export function toCliArgs(config: RunConfig): string[] {
   const args = [
-    "--url",
-    config.targetUrl,
     "--name",
     config.projectName,
-    "--start-path",
-    config.startPath,
     "--out",
     config.outDir,
-    "--max-screens",
-    String(config.budget.maxScreens),
-    "--max-duration",
-    String(config.budget.maxDurationMs),
     "--provider",
     config.ai.kind,
   ];
 
-  if (config.headless) args.push("--headless");
-  if (config.login.enabled && config.login.username) args.push("--user", config.login.username);
-  if (!config.login.enabled) args.push("--no-login");
-  if (config.crud.create) args.push("--create");
-  if (config.crud.update) args.push("--update");
-  if (config.crud.delete) args.push("--delete");
-  if (config.crud.deleteConsent) args.push("--delete-consent");
+  // ── 대상 ────────────────────────────────────────────────────────────
+  if (config.mode !== "source") {
+    args.push("--url", config.targetUrl, "--start-path", config.startPath);
+  }
+  if (config.mode !== "runtime" && config.source.rootDir) {
+    args.push("--source", config.source.rootDir);
+  }
+
+  // ── 실행 QA 에만 의미 있는 것 ───────────────────────────────────────
+  if (config.mode !== "source") {
+    args.push(
+      "--max-screens",
+      String(config.budget.maxScreens),
+      "--max-duration",
+      String(config.budget.maxDurationMs),
+    );
+    if (config.headless) args.push("--headless");
+    if (config.login.enabled && config.login.username) args.push("--user", config.login.username);
+    if (!config.login.enabled) args.push("--no-login");
+    if (config.crud.create) args.push("--create");
+    if (config.crud.update) args.push("--update");
+    if (config.crud.delete) args.push("--delete");
+    if (config.crud.deleteConsent) args.push("--delete-consent");
+  }
+
+  // ── 소스 QA ─────────────────────────────────────────────────────────
+  if (config.mode !== "runtime") {
+    if (config.source.changeImpact) args.push("--change-impact");
+    if (config.source.changeBase) args.push("--change-base", config.source.changeBase);
+    args.push("--ai-upload", config.source.aiUpload);
+    // 동의한 것만 넘긴다. 넘기지 않으면 엔진은 아무 명령도 실행하지 않는다.
+    if (config.source.allowTest) args.push("--allow-test");
+    if (config.source.allowBuild) args.push("--allow-build");
+  }
+
+  // ── AI ──────────────────────────────────────────────────────────────
   if (config.ai.model) args.push("--model", config.ai.model);
   if (config.ai.baseUrl) args.push("--ollama-url", config.ai.baseUrl);
   if (config.ai.visionCapable) args.push("--vision");

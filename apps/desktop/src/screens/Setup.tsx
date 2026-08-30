@@ -398,24 +398,36 @@ export function Setup() {
         </section>
       )}
 
-      {mode !== "source" && (
       <section className="card">
         <h2>대상</h2>
+        {/* 프로젝트명은 모드와 무관하게 필요하다. 숨기면 소스 QA 에서 이름을 못 짓는다. */}
         <label>
           프로젝트명
           <input value={name} onChange={(e) => setName(e.target.value)} data-testid="cfg-name" />
         </label>
-        <label>
-          Target URL
-          <input value={targetUrl} onChange={(e) => setTargetUrl(e.target.value)} data-testid="cfg-url" />
-        </label>
-        <label>
-          Start Path
-          <input value={startPath} onChange={(e) => setStartPath(e.target.value)} data-testid="cfg-start" />
-        </label>
+        {mode !== "source" && (
+          <>
+            <label>
+              Target URL
+              <input
+                value={targetUrl}
+                onChange={(e) => setTargetUrl(e.target.value)}
+                data-testid="cfg-url"
+              />
+            </label>
+            <label>
+              Start Path
+              <input
+                value={startPath}
+                onChange={(e) => setStartPath(e.target.value)}
+                data-testid="cfg-start"
+              />
+            </label>
+          </>
+        )}
       </section>
-      )}
 
+      {mode !== "source" && (
       <section className="card">
         <h2>로그인</h2>
         <label className="row">
@@ -454,6 +466,7 @@ export function Setup() {
           </>
         )}
       </section>
+      )}
 
       <section className="card">
         <h2>AI Provider</h2>
