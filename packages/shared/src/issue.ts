@@ -6,7 +6,34 @@ export type Severity = z.infer<typeof Severity>;
 export const Priority = z.enum(["P0", "P1", "P2", "P3"]);
 export type Priority = z.infer<typeof Priority>;
 
-export const IssueSource = z.enum(["console", "network", "visual", "functional", "crud", "ai"]);
+export const IssueSource = z.enum([
+  "console",
+  "network",
+  "visual",
+  "functional",
+  "crud",
+  "ai",
+  /** 소스 QA. 실행 증적이 아니라 코드에서 나온 결함이다. */
+  "source",
+]);
+
+/**
+ * 결함이 가리키는 소스 위치.
+ *
+ * `confidence` 로 **확정과 추정을 구분한다.** 어노테이션 문자열 매칭으로 찾은
+ * 컨트롤러는 1.0 이고, 호출 그래프를 추정해 얻은 서비스·리포지터리는 그보다 낮다.
+ * 이것을 구분하지 않으면 리포트가 추측을 사실처럼 말하게 된다.
+ */
+export const CodeRef = z.object({
+  /** 프로젝트 루트 기준 상대 경로. 절대 경로는 남기지 않는다(사용자 폴더 구조 노출). */
+  file: z.string(),
+  line: z.number().int().positive().nullable(),
+  symbol: z.string().nullable().default(null),
+  confidence: z.number().min(0).max(1).default(1),
+  /** 왜 이 위치를 가리키는가 */
+  reason: z.string().default(""),
+});
+export type CodeRef = z.infer<typeof CodeRef>;
 export type IssueSource = z.infer<typeof IssueSource>;
 
 /**
@@ -29,6 +56,8 @@ export const IssueCandidate = z.object({
    */
   dedupKey: z.string(),
   evidenceIds: z.array(z.string()).min(1),
+  /** 소스 위치. 실행 QA 결함은 비어 있고, 통합 QA 에서 채워질 수 있다. */
+  codeRefs: z.array(CodeRef).default([]),
   /** 룰이 아니라 AI가 만든 후보인 경우 근거 문장 */
   aiRationale: z.string().nullable().default(null),
   detectedAt: z.string().datetime(),
@@ -63,6 +92,8 @@ export const Issue = z.object({
   reproduction: z.array(z.string()),
   recommendation: z.string(),
   evidenceIds: z.array(z.string()).min(1),
+  /** 소스 위치. 실행 QA 결함은 비어 있고, 통합 QA 에서 채워질 수 있다. */
+  codeRefs: z.array(CodeRef).default([]),
   /** 이 Issue로 병합된 후보 수 = 발생 빈도 */
   occurrenceCount: z.number().int().positive(),
   dedupKey: z.string(),

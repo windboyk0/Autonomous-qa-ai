@@ -19,6 +19,7 @@ import { login } from "./login.js";
 import type { RunContext } from "./run-context.js";
 import { Explorer, makeStartPlan, type ExploreResult } from "./explorer.js";
 import { judge } from "./judge.js";
+import { runSourceQa, type SourceQaOutcome } from "./source/run-source.js";
 import { renderReport } from "./report.js";
 import { AiGuard, createProvider, enrich, passthrough, type EnrichResult } from "./ai/index.js";
 import { NO_CONTROL, type RunControl } from "./control.js";
@@ -161,6 +162,7 @@ function buildSummary(input: {
   crud?: CrudResult[];
   leftovers?: string[];
   stopped?: boolean;
+  source?: SourceQaOutcome | null;
 }): RunSummary {
   const { runId, config, startedAt, explored, issues } = input;
   const finishedAt = new Date();
@@ -190,6 +192,8 @@ function buildSummary(input: {
     explorationLimits: explored.limits,
     unverifiedAreas: [
       ...unverifiedAreas(explored.actionResults, config),
+      // 소스 QA 가 하지 않은 것도 같은 자리에 적는다. 모드가 달라도 "안 본 것"은 하나다.
+      ...(input.source?.unverified ?? []),
       // 정리하지 못한 테스트 데이터는 **식별자와 함께** 반드시 남긴다.
       // 사용자가 직접 지울 수 있어야 한다.
       ...(input.leftovers ?? []).map((l) => `정리되지 않은 테스트 데이터: ${l}`),
@@ -205,12 +209,84 @@ function buildSummary(input: {
  * CLI에서 분리해 둔 이유는 통합 테스트가 프로세스를 띄우지 않고
  * 이 함수만 직접 호출할 수 있게 하기 위해서다.
  */
+/**
+ * 소스 전용 Run.
+ *
+ * 탐색 그래프가 없으므로 빈 결과를 만들어 넘긴다. 리포트 목차는 하나뿐이고,
+ * 모드마다 다른 리포트를 만들면 사용자가 두 가지를 읽는 법을 배워야 한다.
+ */
+async function runSourceOnly(
+  config: RunConfig,
+  ctx: RunContext,
+  startedAt: Date,
+  options: RunOptions,
+): Promise<RunOutcome> {
+  const source = runSourceQa(config, ctx);
+
+  const explored: ExploreResult = {
+    graph: { nodes: [], edges: [] },
+    actionResults: [],
+    candidates: [],
+    limits: [],
+  };
+
+  const judged = judge(source.candidates, explored.graph);
+  log("info", `Issue 확정: 후보 ${judged.mergedFrom}건 → Issue ${judged.issues.length}건`);
+
+  const enriched = await enrichWithAi({
+    config,
+    issues: judged.issues,
+    explored,
+    evidences: ctx.listEvidences(),
+    makeProvider: options.createProvider ?? createProvider,
+  });
+
+  for (const issue of enriched.issues) {
+    emit({ type: "issue:found", at: new Date().toISOString(), issue });
+  }
+
+  const summary = buildSummary({
+    runId: ctx.runId,
+    config,
+    startedAt,
+    explored,
+    issues: enriched.issues,
+    ai: enriched,
+    source,
+    stopped: options.control?.stopped ?? false,
+  });
+
+  const reportPath = ctx.writeReport(
+    renderReport({
+      summary,
+      issues: enriched.issues,
+      evidences: ctx.listEvidences(),
+      aiSummary: enriched.summaryText,
+    }),
+  );
+  const issuesPath = ctx.writeIssues({ schemaVersion: 1, summary, issues: enriched.issues });
+
+  emit({ type: "run:finished", at: new Date().toISOString(), summary, reportPath, issuesPath });
+  return { status: summary.status, message: `소스 결함 ${enriched.issues.length}건` };
+}
+
 export async function runQa(
   config: RunConfig,
   ctx: RunContext,
   options: RunOptions = {},
 ): Promise<RunOutcome> {
   const startedAt = new Date();
+
+  /*
+   * 소스 QA 는 브라우저를 띄우지 않는다.
+   *
+   * preflightBrowser() 를 먼저 부르면 Chromium 이 없는 환경에서 소스 QA 조차
+   * 시작하지 못한다. 모드가 요구하지 않는 자원은 확인하지도 않는다.
+   */
+  if (config.mode === "source") {
+    return await runSourceOnly(config, ctx, startedAt, options);
+  }
+
   const pre = await preflightBrowser();
   if (!pre.ok) {
     log("error", pre.remediation ?? "브라우저를 기동할 수 없습니다.");
@@ -304,7 +380,16 @@ export async function runQa(
     }
 
     // ── Issue 확정 (룰) ───────────────────────────────────────────────
-    const judged = judge([...explored.candidates, ...crudOutcome.candidates], explored.graph);
+    /*
+     * 통합 모드에서는 소스 결함도 **같은 judge** 에 넣는다.
+     * 파이프라인을 하나로 두어야 우선순위가 한 자에서 매겨진다 —
+     * 소스 리포트와 실행 리포트를 따로 내면 사용자가 둘을 손으로 합쳐야 한다.
+     */
+    const sourceOutcome = config.mode === "integrated" ? runSourceQa(config, ctx) : null;
+    const judged = judge(
+      [...explored.candidates, ...crudOutcome.candidates, ...(sourceOutcome?.candidates ?? [])],
+      explored.graph,
+    );
     log(
       "info",
       `Issue 확정: 후보 ${judged.mergedFrom}건 → Issue ${judged.issues.length}건`,
@@ -333,6 +418,7 @@ export async function runQa(
       issues: enriched.issues,
       ai: enriched,
       crud: crudOutcome.results,
+      source: sourceOutcome,
       leftovers: leftovers.map((r) => `${r.marker} (${r.screen}) — ${r.cleanupError ?? "사유 미상"}`),
       stopped: options.control?.stopped ?? false,
     });

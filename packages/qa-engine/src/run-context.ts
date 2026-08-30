@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import type { Evidence, EvidenceKind } from "@qa/shared";
 import { scrub } from "./emitter.js";
 
-const SUBDIRS = ["screenshots", "dom", "aria", "network", "console", "visual", "actions"] as const;
+const SUBDIRS = ["screenshots", "dom", "aria", "network", "console", "visual", "actions", "source"] as const;
 
 /**
  * Run 1회의 출력 상태를 들고 있는 객체.

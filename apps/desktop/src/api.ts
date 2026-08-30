@@ -46,6 +46,9 @@ export interface QaApi {
     }): Promise<number>;
     remove(id: number): Promise<void>;
   };
+  dialog: {
+    pickFolder(): Promise<{ ok: boolean; dir: string | null }>;
+  };
   ai: {
     ollamaModels(baseUrl: string): Promise<{
       ok: boolean;

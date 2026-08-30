@@ -12,6 +12,8 @@ import { useStore } from "../store.js";
 export function Setup() {
   const { selectedProjectId, go, beginRun, setError, lastError } = useStore();
 
+  const [mode, setMode] = useState<"runtime" | "source" | "integrated">("runtime");
+  const [sourceDir, setSourceDir] = useState("");
   const [name, setName] = useState("");
   const [targetUrl, setTargetUrl] = useState("http://localhost:3100");
   const [startPath, setStartPath] = useState("/");
@@ -93,7 +95,10 @@ export function Setup() {
   const buildConfig = (): RunConfig =>
     ({
       projectName: name || "프로젝트",
-      targetUrl,
+      mode,
+      // 실행이 없는 모드에 URL을 넘기면 스키마가 거부한다. 모드가 요구하는 것만 채운다.
+      targetUrl: mode === "source" ? "" : targetUrl,
+      source: { rootDir: mode === "runtime" ? "" : sourceDir },
       startPath,
       headless,
       login: { enabled: useLogin, username, password: "" },
@@ -135,9 +140,13 @@ export function Setup() {
     if (preflight.engineError) return preflight.engineError;
     if (preflight.running) return "이미 실행 중인 Run이 있습니다. 끝나면 다시 시도하세요.";
     if (selectedProjectId === null) return "프로젝트를 먼저 선택하세요.";
-    if (!targetUrl.trim()) return "Target URL을 입력하세요.";
-    if (useLogin && !username.trim()) return "로그인을 쓰려면 아이디가 필요합니다.";
-    if (useLogin && !password && !hasStoredPassword) return "비밀번호를 입력하세요.";
+    // 모드마다 필요한 입력이 다르다. 필요 없는 것을 요구하면 시작조차 못 한다.
+    if (mode !== "source" && !targetUrl.trim()) return "Target URL을 입력하세요.";
+    if (mode !== "runtime" && !sourceDir.trim()) return "QA할 프로젝트 폴더를 고르세요.";
+    if (mode !== "source" && useLogin && !username.trim())
+      return "로그인을 쓰려면 아이디가 필요합니다.";
+    if (mode !== "source" && useLogin && !password && !hasStoredPassword)
+      return "비밀번호를 입력하세요.";
     if (del && !deleteConsent) return "삭제 테스트에 동의해야 시작할 수 있습니다.";
     // 모델 없이 Ollama를 켜면 엔진이 헬스체크에서 떨어진다. 여기서 미리 막는다.
     if (provider === "ollama" && !model.trim()) return "사용할 Ollama 모델을 선택하세요.";
@@ -211,6 +220,91 @@ export function Setup() {
         </div>
       )}
 
+      {/*
+        브라우저 QA와 소스 QA는 찾는 문제가 다르다(CLAUDE.md §2-1).
+        무엇을 찾고 싶은지부터 고르게 하고, 그 모드에 필요한 입력만 보여준다.
+      */}
+      <section className="card">
+        <h2>QA 테스트 방식</h2>
+        <label className="row">
+          <input
+            type="radio"
+            name="qa-mode"
+            checked={mode === "runtime"}
+            onChange={() => setMode("runtime")}
+            data-testid="mode-runtime"
+          />
+          <span>
+            <b>실행 QA</b> — URL + 계정. 화면·CRUD·API 실패·Console·UX
+          </span>
+        </label>
+        <label className="row">
+          <input
+            type="radio"
+            name="qa-mode"
+            checked={mode === "source"}
+            onChange={() => setMode("source")}
+            data-testid="mode-source"
+          />
+          <span>
+            <b>소스 QA</b> — 프로젝트 폴더. 권한 검사·예외·주입·시크릿
+          </span>
+        </label>
+        <label className="row">
+          <input
+            type="radio"
+            name="qa-mode"
+            checked={mode === "integrated"}
+            onChange={() => setMode("integrated")}
+            data-testid="mode-integrated"
+          />
+          <span>
+            <b>통합 QA</b> — 폴더 + URL + 계정. 화면 오류를 소스까지 추적
+          </span>
+        </label>
+        <p className="hint">
+          실행 QA는 권한 검사 누락을 원리적으로 찾을 수 없습니다 — 위험한 버튼은 누르지 않는 것이
+          정답이기 때문입니다. 소스 QA는 반대로 화면이 실제로 뜨는지 알 수 없습니다.
+        </p>
+      </section>
+
+      {mode !== "runtime" && (
+        <section className="card">
+          <h2>프로젝트 폴더</h2>
+          <label>
+            경로
+            <input
+              value={sourceDir}
+              onChange={(e) => setSourceDir(e.target.value)}
+              data-testid="cfg-source-dir"
+              placeholder="C:\\project\\groupware"
+            />
+          </label>
+          <button
+            className="btn-ghost"
+            data-testid="pick-folder"
+            onClick={() => {
+              void (async () => {
+                const r = await qa().dialog.pickFolder();
+                if (r.ok && r.dir) setSourceDir(r.dir);
+              })();
+            }}
+          >
+            폴더 선택
+          </button>
+          <p className="hint">
+            소스는 읽기만 합니다. 빌드·테스트는 실행하지 않고, <code>.env</code>·인증서 파일은
+            열지 않습니다.
+            {provider === "claude"
+              ? " 결함이 걸린 구간만 Claude로 전송됩니다."
+              : provider === "ollama"
+                ? " Ollama는 로컬이라 소스가 밖으로 나가지 않습니다."
+                : " AI를 쓰지 않으므로 소스가 밖으로 나가지 않습니다."}
+          </p>
+        </section>
+      )}
+
+      {mode !== "source" && (
       <section className="card">
         <h2>대상</h2>
         <label>
@@ -226,6 +320,7 @@ export function Setup() {
           <input value={startPath} onChange={(e) => setStartPath(e.target.value)} data-testid="cfg-start" />
         </label>
       </section>
+      )}
 
       <section className="card">
         <h2>로그인</h2>

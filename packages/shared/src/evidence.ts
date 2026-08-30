@@ -88,6 +88,8 @@ export const VisualMetrics = z.object({
 export type VisualMetrics = z.infer<typeof VisualMetrics>;
 
 export const EvidenceKind = z.enum([
+  /** 소스 스니펫. 파일 경로와 구간만 남기고 시크릿 파일의 값은 담지 않는다. */
+  "source",
   "screenshot",
   "dom",
   "aria",

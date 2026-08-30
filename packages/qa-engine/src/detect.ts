@@ -43,6 +43,8 @@ function candidate(input: {
   return {
     id: `cand-${String(candidateSeq).padStart(4, "0")}`,
     source: input.source,
+    // 실행 증적에서 나온 결함이라 소스 위치를 모른다. 통합 QA 가 매핑해 채운다.
+    codeRefs: [],
     ruleId: input.ruleId,
     title: input.title,
     description: input.description,

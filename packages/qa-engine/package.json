@@ -18,6 +18,7 @@
     "zod": "^3.23.8"
   },
   "devDependencies": {
-    "@qa/fixture-admin": "workspace:*"
+    "@qa/fixture-admin": "workspace:*",
+    "@qa/fixture-src": "workspace:*"
   }
 }

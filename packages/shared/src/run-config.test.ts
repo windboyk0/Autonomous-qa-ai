@@ -101,3 +101,57 @@ describe("RunConfig 기본값", () => {
     expect(RunConfig.safeParse({ ...base, targetUrl: url }).success).toBe(ok);
   });
 });
+
+/**
+ * 모드마다 필요한 입력이 다르다. 여기서 막지 않으면 소스 경로 없이 소스 QA가
+ * 시작되어 "결함 0건"이라는 거짓 안심을 준다.
+ */
+describe("QA 모드", () => {
+  it("기본은 실행 QA다", () => {
+    expect(RunConfig.parse(base).mode).toBe("runtime");
+  });
+
+  it("소스 모드에는 URL이 없어도 되고, 대신 폴더가 필요하다", () => {
+    const noUrl = { projectName: "p", mode: "source" as const };
+    expect(RunConfig.safeParse(noUrl).success).toBe(false);
+    expect(
+      RunConfig.safeParse({ ...noUrl, source: { rootDir: "C:/project/groupware" } }).success,
+    ).toBe(true);
+  });
+
+  it("실행 모드에서 URL이 비면 거부한다", () => {
+    expect(RunConfig.safeParse({ projectName: "p", targetUrl: "" }).success).toBe(false);
+  });
+
+  it("통합 모드는 URL과 폴더를 둘 다 요구한다", () => {
+    expect(RunConfig.safeParse({ ...base, mode: "integrated" }).success).toBe(false);
+    expect(
+      RunConfig.safeParse({
+        ...base,
+        mode: "integrated",
+        source: { rootDir: "C:/project/groupware" },
+      }).success,
+    ).toBe(true);
+  });
+
+  it("소스가 AI로 나가는 범위는 기본이 스니펫이고, 저장소 전체 선택지는 없다", () => {
+    const parsed = RunConfig.parse(base);
+    expect(parsed.source.aiUpload).toBe("snippets");
+    expect(
+      RunConfig.safeParse({ ...base, source: { rootDir: "x", aiUpload: "repo" } }).success,
+    ).toBe(false);
+  });
+
+  it("빌드·테스트 실행은 기본으로 꺼져 있다", () => {
+    const parsed = RunConfig.parse(base);
+    expect(parsed.source.allowBuild).toBe(false);
+    expect(parsed.source.allowTest).toBe(false);
+  });
+
+  it("스캔 예산이 비어 있지 않다", () => {
+    const s = RunConfig.parse(base).source;
+    expect(s.maxFiles).toBeGreaterThan(0);
+    expect(s.maxFileBytes).toBeGreaterThan(0);
+    expect(s.maxTotalBytes).toBeGreaterThan(0);
+  });
+});

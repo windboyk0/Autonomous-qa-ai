@@ -13,6 +13,9 @@ const api = {
     save: (input: unknown) => ipcRenderer.invoke("projects:save", input),
     remove: (id: number) => ipcRenderer.invoke("projects:delete", id),
   },
+  dialog: {
+    pickFolder: () => ipcRenderer.invoke("dialog:pickFolder"),
+  },
   ai: {
     ollamaModels: (baseUrl: string) => ipcRenderer.invoke("ai:ollamaModels", baseUrl),
   },

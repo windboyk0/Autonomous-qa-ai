@@ -107,7 +107,41 @@ export const AiProviderConfig = z.object({
 });
 export type AiProviderConfig = z.infer<typeof AiProviderConfig>;
 
+/**
+ * QA 모드 (CLAUDE.md §2-1).
+ *
+ * 브라우저 QA와 소스 QA는 찾는 문제가 다르다. 하나로 뭉뚱그리면 둘 다 얕아진다.
+ */
+export const QaMode = z.enum(["runtime", "source", "integrated"]);
+export type QaMode = z.infer<typeof QaMode>;
+
+/**
+ * 소스가 AI로 나가는 범위 (CLAUDE.md §16-1).
+ *
+ * 저장소 전체를 넘기는 선택지는 두지 않는다. 넘길 수도 없고 넘겨서도 안 된다.
+ */
+export const SourceAiUpload = z.enum(["none", "snippets", "files"]);
+export type SourceAiUpload = z.infer<typeof SourceAiUpload>;
+
+export const SourceConfig = z.object({
+  /** 프로젝트 루트 절대 경로 */
+  rootDir: z.string().default(""),
+  aiUpload: SourceAiUpload.default("snippets"),
+  /** 스캔 상한. 예산 없는 스캔은 큰 저장소에서 끝나지 않는다. */
+  maxFiles: z.number().int().positive().default(5_000),
+  maxFileBytes: z.number().int().positive().default(512 * 1024),
+  maxTotalBytes: z.number().int().positive().default(64 * 1024 * 1024),
+  /**
+   * 빌드·테스트 실행 동의 (CLAUDE.md §9).
+   * 기본은 전부 false 다. 동의가 있어도 의존성 설치는 하지 않는다.
+   */
+  allowBuild: z.boolean().default(false),
+  allowTest: z.boolean().default(false),
+});
+export type SourceConfig = z.infer<typeof SourceConfig>;
+
 export const RunConfig = z.object({
+  mode: QaMode.default("runtime"),
   projectName: z.string().min(1),
   /**
    * zod의 `.url()`만으로는 부족하다. `localhost:3100`은 스킴이 `localhost:`인
@@ -116,10 +150,11 @@ export const RunConfig = z.object({
    */
   targetUrl: z
     .string()
-    .url()
+    .default("")
     .refine(
       (v) => {
-        // .url() 이 실패한 값에도 이 refine이 호출되므로 스스로 방어해야 한다.
+        // 소스 모드에는 URL이 없다. 빈 값은 여기서 통과시키고 모드별 필수 여부는 아래에서 본다.
+        if (v === "") return true;
         try {
           return /^https?:$/.test(new URL(v).protocol);
         } catch {
@@ -138,10 +173,34 @@ export const RunConfig = z.object({
   checks: CheckScope.default({}),
   safety: SafetyPolicy.default({}),
   budget: ExploreBudget.default({}),
+  source: SourceConfig.default({}),
   ai: AiProviderConfig.default({}),
   /** 증적 출력 루트. 실제 Run 디렉터리는 <outDir>/<runId> */
   outDir: z.string().default("runs"),
-});
+})
+  /**
+   * 모드마다 필요한 입력이 다르다.
+   *
+   * 이것을 필드 수준에서 강제할 수 없어 객체 수준에서 본다. 여기서 막지 않으면
+   * 소스 경로 없이 소스 QA가 시작되어 "결함 0건"이라는 **거짓 안심**을 준다.
+   * 실행 QA에서 targetUrl 없이 시작하는 것도 마찬가지다.
+   */
+  .superRefine((c, ctx) => {
+    if (c.mode !== "source" && c.targetUrl === "") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["targetUrl"],
+        message: `${c.mode} 모드에는 Target URL이 필요합니다`,
+      });
+    }
+    if (c.mode !== "runtime" && c.source.rootDir.trim() === "") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["source", "rootDir"],
+        message: `${c.mode} 모드에는 프로젝트 폴더가 필요합니다`,
+      });
+    }
+  });
 export type RunConfig = z.infer<typeof RunConfig>;
 
 /** 로그·이벤트·리포트로 나가기 전에 반드시 통과시켜야 하는 마스킹 함수. */

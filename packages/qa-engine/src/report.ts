@@ -11,6 +11,20 @@ import type { Evidence, Issue, RunSummary, Severity } from "@qa/shared";
  * 이 도구의 가장 위험한 실패 모드다.
  */
 
+/** 모드는 리포트를 읽는 방식을 바꾼다. 무엇을 보고 만든 리포트인지 먼저 밝힌다. */
+const MODE_LABEL: Record<string, string> = {
+  runtime: "실행 QA (URL)",
+  source: "소스 QA (프로젝트 폴더)",
+  integrated: "통합 QA (실행 + 소스)",
+};
+
+/** 소스가 외부로 나갔는지는 사용자가 알아야 할 사실이다. */
+const UPLOAD_LABEL: Record<string, string> = {
+  none: "전송하지 않음",
+  snippets: "결함이 걸린 구간만",
+  files: "결함이 걸린 파일 전체",
+};
+
 const SEVERITY_LABEL: Record<Severity, string> = {
   CRITICAL: "Critical",
   HIGH: "High",
@@ -66,6 +80,24 @@ function issueSection(issue: Issue, evidences: readonly Evidence[]): string {
     "",
     `**증적** ${links.length > 0 ? links.join(", ") : "(파일 없음)"}`,
     "",
+    /*
+     * "어느 파일 몇 번째 줄을 고쳐야 하나" 가 소스 QA 의 존재 이유다.
+     * confidence 를 같이 적어 **확정과 추정을 구분한다** — 추측을 사실처럼
+     * 적으면 개발자가 엉뚱한 파일을 열고, 그 순간 이 리포트의 신뢰가 끝난다.
+     */
+    ...(issue.codeRefs.length > 0
+      ? [
+          "**관련 소스**",
+          ...issue.codeRefs.map(
+            (r) =>
+              `  ${r.file}${r.line === null ? "" : `:${r.line}`}` +
+              `${r.symbol ? ` (${r.symbol})` : ""}` +
+              `${r.confidence >= 1 ? "" : ` — 추정 ${Math.round(r.confidence * 100)}%`}` +
+              `${r.reason ? ` · ${r.reason}` : ""}`,
+          ),
+        ]
+      : []),
+    "",
     `**권장** ${issue.recommendation}`,
     "",
     `**발생** ${issue.occurrenceCount}회 / ${issue.screens.length}개 화면 · 우선순위 점수 ${issue.priorityFactors.score}`,
@@ -115,7 +147,16 @@ export function renderReport(input: {
     "",
     "| 항목 | 값 |",
     "|---|---|",
-    `| 브라우저 | Chromium (${cfg.headless ? "headless" : "headed"}) |`,
+    `| QA 모드 | ${MODE_LABEL[cfg.mode]} |`,
+    ...(cfg.mode === "runtime"
+      ? []
+      : [
+          `| 소스 AI 전송 범위 | ${UPLOAD_LABEL[cfg.source.aiUpload]} |`,
+          `| 빌드·테스트 실행 | ${cfg.source.allowBuild || cfg.source.allowTest ? "동의함" : "하지 않음"} |`,
+        ]),
+    ...(cfg.mode === "source"
+      ? []
+      : [`| 브라우저 | Chromium (${cfg.headless ? "headless" : "headed"}) |`]),
     `| 뷰포트 | ${cfg.viewport.width} × ${cfg.viewport.height} |`,
     `| CRUD 범위 | ${(["create", "read", "update", "delete"] as const)
       .filter((k) => cfg.crud[k])

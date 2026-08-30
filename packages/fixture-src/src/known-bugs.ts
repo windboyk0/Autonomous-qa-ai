@@ -41,7 +41,8 @@ export const KNOWN_SOURCE_BUGS: KnownSourceBug[] = [
     category: "authz",
     severity: "CRITICAL",
     file: "backend/src/main/java/com/example/groupware/controller/UserController.java",
-    anchor: '@DeleteMapping("/{id}")',
+    // 결함은 애너테이션이 아니라 **핸들러**에 있다. 위치도 거기를 가리킨다.
+    anchor: "public ResponseEntity<Void> delete(",
     runtimeCanFind: false,
     why:
       "같은 컨트롤러의 다른 엔드포인트에는 모두 @PreAuthorize 가 있는데 삭제에만 없다. " +
@@ -63,7 +64,7 @@ export const KNOWN_SOURCE_BUGS: KnownSourceBug[] = [
     category: "error-handling",
     severity: "MEDIUM",
     file: "backend/src/main/java/com/example/groupware/service/UserService.java",
-    anchor: "// SRC-03",
+    anchor: "} catch (Exception e) {",
     runtimeCanFind: false,
     why: "저장이 실패해도 catch 블록이 비어 있어 호출자도 사용자도 알 수 없다.",
   },
@@ -127,7 +128,7 @@ export const KNOWN_SOURCE_BUGS: KnownSourceBug[] = [
     category: "error-handling",
     severity: "MEDIUM",
     file: "frontend/src/api/userApi.ts",
-    anchor: "// SRC-09",
+    anchor: 'fetch("/api/users", {',
     runtimeCanFind: true,
     why: "await 도 catch 도 없다. 저장 실패가 조용히 묻힌다.",
   },

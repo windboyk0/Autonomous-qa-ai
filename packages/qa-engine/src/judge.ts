@@ -249,6 +249,13 @@ export function judge(candidates: IssueCandidate[], graph: StateGraph): JudgeRes
     const severity = list.reduce<Severity>((acc, c) => higher(acc, c.suggestedSeverity), "LOW");
     // 하나도 버리지 않고 전부 합친다.
     const evidenceIds = [...new Set(list.flatMap((c) => c.evidenceIds))];
+    /*
+     * 소스 위치도 하나도 버리지 않고 합친다. 같은 결함이 여러 파일을 가리킬 수 있고
+     * (컨트롤러 + 서비스), 그 목록이 곧 "어디를 고쳐야 하나"에 대한 답이다.
+     */
+    const codeRefs = [...new Map(
+      list.flatMap((c) => c.codeRefs).map((r) => [`${r.file}:${r.line ?? 0}`, r]),
+    ).values()];
     const screens = [...new Set(list.map((c) => c.screenName))];
     const distinctStates = new Set(list.map((c) => c.stateKey)).size;
 
@@ -270,6 +277,7 @@ export function judge(candidates: IssueCandidate[], graph: StateGraph): JudgeRes
     merged.push({
       title: first.title,
       source: first.source,
+      codeRefs,
       ruleId: first.ruleId,
       severity,
       screens,

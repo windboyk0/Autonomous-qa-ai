@@ -1,6 +1,6 @@
 import { readFileSync, existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { ipcMain, shell, type BrowserWindow } from "electron";
+import { BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { RunConfig, type EngineEvent, type Issue, type RunSummary } from "@qa/shared";
 import { EngineProcess, resolveEnginePath } from "./engine.js";
 import { credentialStatus, decryptPassword, encryptPassword } from "./credentials.js";
@@ -138,7 +138,25 @@ export class IpcLayer {
      * 렌더러는 CSP(`default-src 'self'`)에 막혀 외부로 요청할 수 없다.
      * main이 대신 물어보고 결과만 넘긴다 — 렌더러에 네트워크 권한을 주지 않는다.
      */
-    ipcMain.handle("ai:ollamaModels", async (_e, baseUrl: string) => {
+    /**
+   * 프로젝트 폴더 선택.
+   *
+   * 경로를 손으로 치게 두면 오타 하나로 "결함 0건"이 나오고, 그것이
+   * **깨끗한 코드라는 뜻으로 읽힌다.** 존재하는 폴더만 고를 수 있게 한다.
+   */
+  ipcMain.handle("dialog:pickFolder", async () => {
+    const win = BrowserWindow.getAllWindows()[0];
+    const result = win
+      ? await dialog.showOpenDialog(win, {
+          title: "QA 대상 프로젝트 폴더",
+          properties: ["openDirectory"],
+        })
+      : await dialog.showOpenDialog({ properties: ["openDirectory"] });
+    if (result.canceled || result.filePaths.length === 0) return { ok: false as const, dir: null };
+    return { ok: true as const, dir: result.filePaths[0] ?? null };
+  });
+
+  ipcMain.handle("ai:ollamaModels", async (_e, baseUrl: string) => {
       try {
         const res = await fetch(new URL("/api/tags", baseUrl).toString(), {
           signal: AbortSignal.timeout(5000),
