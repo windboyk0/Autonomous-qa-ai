@@ -493,7 +493,10 @@ export async function runQa(
      * 파이프라인을 하나로 두어야 우선순위가 한 자에서 매겨진다 —
      * 소스 리포트와 실행 리포트를 따로 내면 사용자가 둘을 손으로 합쳐야 한다.
      */
-    const sourceOutcome = config.mode === "integrated" ? runSourceQa(config, ctx) : null;
+    const sourceOutcome =
+      config.mode === "integrated"
+        ? runSourceQa(config, ctx, { screensExplored: explored.graph.nodes.length })
+        : null;
     const judged = judge(
       [...explored.candidates, ...crudOutcome.candidates, ...(sourceOutcome?.candidates ?? [])],
       explored.graph,

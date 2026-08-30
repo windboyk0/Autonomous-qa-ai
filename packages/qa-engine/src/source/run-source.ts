@@ -149,7 +149,17 @@ function authzCandidates(open: ExtractedEndpoint[], evidenceId: string): IssueCa
   );
 }
 
-export function runSourceQa(config: RunConfig, ctx: RunContext): SourceQaOutcome {
+export function runSourceQa(
+  config: RunConfig,
+  ctx: RunContext,
+  /**
+   * 통합 모드에서 이미 탐색한 화면 수.
+   *
+   * 이것을 넘기지 않으면 소스 스캔이 진행 표시를 덮어써서, 화면 27개를 탐색해
+   * 놓고도 Monitor 에 "505 화면"(= 스캔한 파일 수)이 뜬다. 실측에서 그랬다.
+   */
+  progress: { screensExplored?: number } = {},
+): SourceQaOutcome {
   const rootDir = config.source.rootDir;
   log("info", `소스 스캔 시작: ${rootDir}`);
 
@@ -243,11 +253,12 @@ export function runSourceQa(config: RunConfig, ctx: RunContext): SourceQaOutcome
   emit({
     type: "run:progress",
     at: new Date().toISOString(),
-    screensExplored: scan.files.length,
+    // 파일 수는 화면 수가 아니다. 탐색 결과를 덮어쓰지 않는다.
+    screensExplored: progress.screensExplored ?? 0,
     screensQueued: 0,
     actionsExecuted: 0,
     currentTask: "소스 분석",
-    currentScreen: scan.stack.join(", ") || rootDir,
+    currentScreen: `파일 ${scan.files.length}개${scan.stack.length > 0 ? ` · ${scan.stack.join(", ")}` : ""}`,
   });
 
   log("info", `소스 결함 후보 ${candidates.length}건 (엔드포인트 ${endpoints.length}개 중 권한 누락 ${open.length}건)`);

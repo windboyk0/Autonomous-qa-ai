@@ -185,6 +185,17 @@ describe("Phase 5 — 클릭만으로 QA 실행", () => {
       { timeout: 300_000 },
     );
 
+    /*
+     * 실측 회귀: 정상 완료한 실행에 "QA를 끝까지 진행하지 못했습니다" 배너가 떴다.
+     *
+     * 엔진은 성공해도 run:status 에 요약 메시지를 담아 보내는데, 그것을 그대로
+     * 실패 사유로 올린 탓이었다. 성공 요약을 실패 자리에 넣으면 사용자는
+     * 멀쩡한 결과를 의심하게 된다.
+     */
+    expect(await page.locator('[data-testid="run-status"]').innerText()).toBe("COMPLETED");
+    expect(await page.locator('[data-testid="fail-banner"]').count()).toBe(0);
+    expect(await page.locator('[data-testid="crash-banner"]').count()).toBe(0);
+
     await page.click('[data-testid="goto-report"]');
     await page.waitForSelector('[data-testid="report-body"]', { timeout: 30_000 });
 

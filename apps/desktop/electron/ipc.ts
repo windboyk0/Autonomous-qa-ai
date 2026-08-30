@@ -417,7 +417,17 @@ export class IpcLayer {
      * 그건 판정 결과이지 프로그램 오류가 아니다.
      */
     const crashed = !this.sawFinish && this.lastStatus === null;
-    const reason = this.lastStatus?.message ?? null;
+
+    /*
+     * **사유는 끝까지 가지 못했을 때만이다.**
+     *
+     * 엔진은 성공해도 `run:status` 에 요약 메시지를 담아 보낸다
+     * ("화면 27개 탐색 · Issue 35건 · 증적 169건"). 그것을 그대로 사유로 올렸더니
+     * 정상 완료한 실행에 "QA를 끝까지 진행하지 못했습니다" 배너가 떴다(실측).
+     * 성공 요약을 실패 사유 자리에 넣으면 사용자는 멀쩡한 결과를 의심하게 된다.
+     */
+    const completed = this.lastStatus?.status === "COMPLETED";
+    const reason = completed ? null : (this.lastStatus?.message ?? null);
 
     try {
       if (runPk !== null) {
