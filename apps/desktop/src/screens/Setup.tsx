@@ -15,6 +15,8 @@ export function Setup() {
   const [mode, setMode] = useState<"runtime" | "source" | "integrated">("runtime");
   const [sourceDir, setSourceDir] = useState("");
   const [changeImpact, setChangeImpact] = useState(false);
+  const [allowBuild, setAllowBuild] = useState(false);
+  const [allowTest, setAllowTest] = useState(false);
   const [name, setName] = useState("");
   const [targetUrl, setTargetUrl] = useState("http://localhost:3100");
   const [startPath, setStartPath] = useState("/");
@@ -102,6 +104,8 @@ export function Setup() {
       source: {
         rootDir: mode === "runtime" ? "" : sourceDir,
         changeImpact: changeImpact && sourceDir.trim() !== "",
+        allowBuild,
+        allowTest,
       },
       startPath,
       headless,
@@ -309,9 +313,44 @@ export function Setup() {
             탐색 <b>순서</b>만 바꿉니다. 대상을 줄이지 않으므로 예산이 남는 한 나머지 화면도
             전부 봅니다.
           </p>
+          {/*
+            이 도구에서 가장 위험한 부분이다. 켜면 그 프로젝트의 임의 코드가
+            사용자 권한으로 실행된다. Windows 에는 진짜 샌드박스가 없으므로
+            통제 수단은 "무엇이 실행되는지 그대로 보여주고 동의를 받는 것"뿐이다.
+          */}
+          <label className="row">
+            <input
+              type="checkbox"
+              checked={allowTest}
+              onChange={(e) => setAllowTest(e.target.checked)}
+              data-testid="cfg-allow-test"
+            />
+            <span>이 프로젝트의 테스트·린트를 실행한다</span>
+          </label>
+          <label className="row">
+            <input
+              type="checkbox"
+              checked={allowBuild}
+              onChange={(e) => setAllowBuild(e.target.checked)}
+              data-testid="cfg-allow-build"
+            />
+            <span>이 프로젝트의 빌드를 실행한다</span>
+          </label>
+          {(allowBuild || allowTest) && (
+            <div className="alert-warn" data-testid="exec-consent">
+              <b>이 프로젝트의 코드가 실행됩니다.</b>
+              <div className="mt-1">
+                <code>npm run test/lint/build</code>, <code>./gradlew test/build</code>,{" "}
+                <code>mvn test/verify</code> 만 실행합니다. 실제로 무엇을 돌렸는지는 로그와
+                리포트에 그대로 남습니다. 의존성 설치(<code>npm install</code> 등)는 하지 않습니다.
+              </div>
+            </div>
+          )}
           <p className="hint">
-            소스는 읽기만 합니다. 빌드·테스트는 실행하지 않고, <code>.env</code>·인증서 파일은
-            열지 않습니다.
+            {allowBuild || allowTest
+              ? "소스를 읽고, 위에서 동의한 명령만 실행합니다. "
+              : "소스는 읽기만 합니다. 빌드·테스트는 실행하지 않고, "}
+            <code>.env</code>·인증서 파일은 열지 않습니다.
             {provider === "claude"
               ? " 결함이 걸린 구간만 Claude로 전송됩니다."
               : provider === "ollama"

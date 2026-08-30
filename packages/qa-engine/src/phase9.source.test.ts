@@ -72,7 +72,7 @@ describe("Phase 9 — 프로젝트 스캔", () => {
     const commands = outcome.scan.runnableCommands.map((c) => c.command);
     expect(commands).toEqual(expect.arrayContaining(["npm run test", "./gradlew test"]));
     // 실행하지 않았다는 사실이 미검증 목록에 남아야 한다.
-    expect(outcome.unverified.join("\n")).toContain("동의 필요");
+    expect(outcome.unverified.join("\n")).toContain("동의하지 않아 실행하지 않았습니다");
   });
 });
 

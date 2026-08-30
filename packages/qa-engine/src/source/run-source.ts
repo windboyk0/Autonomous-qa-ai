@@ -8,6 +8,7 @@ import { scanProject, type ProjectScan } from "./scan.js";
 import { isSecretKey, readYamlKeyPaths, readConfigKeys } from "./secrets.js";
 import { extractSpringEndpoints, isMutating, unauthorizedEndpoints, type ExtractedEndpoint } from "./endpoints.js";
 import { runFileRules, type SourceFinding } from "./rules.js";
+import { runBuildAndTest, type CommandResult } from "./build-test.js";
 
 /**
  * Source QA 오케스트레이터.
@@ -23,6 +24,8 @@ export interface SourceQaOutcome {
   candidates: IssueCandidate[];
   /** 하지 않은 것. 조용히 끝내면 사용자는 전부 봤다고 착각한다. */
   unverified: string[];
+  /** 실제로 실행한 명령. 동의가 없으면 빈 배열이다. */
+  commands: CommandResult[];
 }
 
 let seq = 0;
@@ -204,10 +207,18 @@ export function runSourceQa(config: RunConfig, ctx: RunContext): SourceQaOutcome
 
   findings.push(...configSecretFindings(rootDir, scan));
 
+  /*
+   * 빌드·테스트 실행. **동의가 없으면 아무것도 돌지 않는다.**
+   * 정적 분석이 끝난 뒤에 돈다 — 명령이 프로젝트 파일을 바꿀 수 있고,
+   * 그러면 앞서 본 것과 결과가 어긋난다.
+   */
+  const build = runBuildAndTest(config, scan, evidenceId);
+
   const open = unauthorizedEndpoints(endpoints);
   const candidates = [
     ...authzCandidates(open, evidenceId),
     ...findings.map((f) => findingToCandidate(f, evidenceId)),
+    ...build.candidates,
   ];
 
   ctx.writeJson("source", "endpoints.json", endpoints);
@@ -217,13 +228,7 @@ export function runSourceQa(config: RunConfig, ctx: RunContext): SourceQaOutcome
    * 소스 QA 는 "결함 0건"이 쉽게 나오는 영역이라, 무엇을 안 봤는지 적지 않으면
    * 리포트가 거짓 안심을 준다.
    */
-  const unverified: string[] = [];
-  if (scan.runnableCommands.length > 0) {
-    const list = [...new Set(scan.runnableCommands.map((c) => c.command))].join(", ");
-    unverified.push(
-      `빌드·테스트·린트를 실행하지 않았습니다 (동의 필요). 이 프로젝트에서 실행 가능한 명령: ${list}`,
-    );
-  }
+  const unverified: string[] = [...build.notRun];
   unverified.push(
     "의존성 취약점 점검을 하지 않았습니다. `npm audit` 등 외부 도구 실행에는 동의가 필요합니다.",
   );
@@ -247,5 +252,9 @@ export function runSourceQa(config: RunConfig, ctx: RunContext): SourceQaOutcome
 
   log("info", `소스 결함 후보 ${candidates.length}건 (엔드포인트 ${endpoints.length}개 중 권한 누락 ${open.length}건)`);
 
-  return { scan, endpoints, candidates, unverified };
+  if (build.results.length > 0) {
+    ctx.writeJson("source", "commands.json", build.results);
+  }
+
+  return { scan, endpoints, candidates, unverified, commands: build.results };
 }
