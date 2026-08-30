@@ -145,7 +145,12 @@ export function Monitor() {
               <dt>실행 액션</dt>
               <dd>{progress.actionsExecuted}</dd>
               <dt>AI</dt>
-              <dd>{aiDetail ?? "사용 안 함"}</dd>
+              {/*
+                엔진이 알려주기 전에 "사용 안 함"이라고 쓰면 안 된다.
+                실측에서 Claude Max 를 골랐는데 탐색 내내 "사용 안 함"으로 보여
+                설정이 안 먹은 것으로 읽혔다. 모르는 것은 모른다고 쓴다.
+              */}
+              <dd data-testid="ai-detail">{aiDetail ?? (running ? "확인 중…" : "-")}</dd>
             </dl>
           </div>
 

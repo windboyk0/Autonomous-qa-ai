@@ -7,6 +7,7 @@ import {
   type AiProviderConfig,
   type Issue,
   type IssuesFile,
+  type ProviderStatus,
   type RunConfig,
   type RunStatus,
   type RunSummary,
@@ -94,30 +95,23 @@ async function enrichWithAi(input: {
   explored: ExploreResult;
   evidences: readonly Evidence[];
   makeProvider: (config: AiProviderConfig) => AiProvider;
+  /** 탐색 전에 이미 확인했으면 그 결과. 없으면 여기서 확인한다. */
+  ready?: AiReady | null;
 }): Promise<EnrichResult> {
   const { config, issues, explored, evidences } = input;
   if (config.ai.kind === "none") return passthrough(issues);
 
-  const provider = input.makeProvider(config.ai);
-
-  const status = await new AiGuard(config.ai.timeoutMs)
-    .run("healthCheck", () => provider.healthCheck())
-    .catch(() => null);
-
-  if (!status?.available) {
-    const detail = status?.detail ?? "Provider 상태를 확인할 수 없습니다.";
-    log("warn", `AI Provider를 사용할 수 없습니다: ${detail}`);
-    if (status?.remediation) log("warn", `조치: ${status.remediation}`);
-    emit({ type: "ai:status", at: new Date().toISOString(), available: false, detail });
+  // 탐색 전에 확인해 두었으면 다시 묻지 않는다. 같은 것을 두 번 물으면
+  // 사용자가 로그에서 같은 줄을 두 번 본다.
+  const ready = input.ready !== undefined ? input.ready : await preflightAi(config, input.makeProvider);
+  if (!ready || !ready.ok) {
     return {
       ...passthrough(issues),
       status: "failed",
-      failureReason: status?.remediation ? `${detail} (${status.remediation})` : detail,
+      failureReason: ready?.ok === false ? ready.reason : "AI Provider를 사용할 수 없습니다.",
     };
   }
-
-  log("info", status.detail);
-  emit({ type: "ai:status", at: new Date().toISOString(), available: true, detail: status.detail });
+  const { provider, status } = ready;
 
   const pages = explored.graph.nodes.map((n) => ({
     screenName: n.screenName,
@@ -223,6 +217,59 @@ function buildSummary(input: {
  * 이 함수만 직접 호출할 수 있게 하기 위해서다.
  */
 /**
+ * AI Provider 를 **탐색 전에** 확인한다.
+ *
+ * 원래는 보강 단계에서야 확인했다. 그러면 두 가지가 나빴다.
+ *   - 실행 Monitor 가 탐색 내내 "AI 사용 안 함" 으로 보인다. 실제로는 아직
+ *     차례가 오지 않았을 뿐인데 사용자는 설정이 안 먹은 줄 안다(실측 신고).
+ *   - Claude 가 없거나 로그인이 안 된 상태를 **4분짜리 탐색이 끝난 뒤에** 안다.
+ *     그때는 이미 늦다.
+ *
+ * 여기서 확인하고 결과를 그대로 보강 단계로 넘긴다. 실패해도 던지지 않는다 —
+ * AI 가 없어도 룰 QA 는 끝까지 간다는 원칙은 그대로다.
+ */
+type AiReady =
+  | { ok: true; provider: AiProvider; status: ProviderStatus }
+  /** 실패 사유는 **반드시** 들고 간다. 없으면 사용자는 왜 AI 가 안 붙었는지 모른다. */
+  | { ok: false; reason: string };
+
+async function preflightAi(
+  config: RunConfig,
+  makeProvider: (c: AiProviderConfig) => AiProvider,
+): Promise<AiReady | null> {
+  if (config.ai.kind === "none") {
+    log("info", "AI Provider 를 사용하지 않습니다. 룰 기반으로만 진행합니다.");
+    emit({
+      type: "ai:status",
+      at: new Date().toISOString(),
+      available: false,
+      detail: "사용 안 함 (룰 기반만)",
+    });
+    return null;
+  }
+
+  const provider = makeProvider(config.ai);
+  const status = await new AiGuard(config.ai.timeoutMs)
+    .run("healthCheck", () => provider.healthCheck())
+    .catch(() => null);
+
+  if (!status?.available) {
+    const detail = status?.detail ?? "Provider 상태를 확인할 수 없습니다.";
+    log("warn", `AI Provider를 사용할 수 없습니다: ${detail}`);
+    if (status?.remediation) log("warn", `조치: ${status.remediation}`);
+    emit({ type: "ai:status", at: new Date().toISOString(), available: false, detail });
+    return {
+      ok: false,
+      reason: status?.remediation ? `${detail} (${status.remediation})` : detail,
+    };
+  }
+
+  log("info", status.detail);
+  emit({ type: "ai:status", at: new Date().toISOString(), available: true, detail: status.detail });
+  return { ok: true, provider, status };
+}
+
+/**
  * 이번 변경이 닿는 영역을 계산한다.
  *
  * 스캔을 한 번 더 도는 비용이 있지만, 소스 QA 를 켜지 않은 실행 QA 에서도
@@ -263,6 +310,7 @@ async function runSourceOnly(
   startedAt: Date,
   options: RunOptions,
 ): Promise<RunOutcome> {
+  const aiReady = await preflightAi(config, options.createProvider ?? createProvider);
   const source = runSourceQa(config, ctx);
   const impact = computeChangeImpact(config);
 
@@ -282,6 +330,7 @@ async function runSourceOnly(
     explored,
     evidences: ctx.listEvidences(),
     makeProvider: options.createProvider ?? createProvider,
+    ready: aiReady,
   });
 
   for (const issue of enriched.issues) {
@@ -388,6 +437,12 @@ export async function runQa(
       return { status: "FAILED", message: result.reason };
     }
 
+    /*
+     * AI 는 탐색 **전에** 확인한다. 여기서 확인하지 않으면 Provider 를 골라 놓고도
+     * 탐색이 끝날 때까지 화면에 "사용 안 함" 이 떠 있고, 연결 실패도 그때 안다.
+     */
+    const aiReady = await preflightAi(config, options.createProvider ?? createProvider);
+
     // ── 자율 탐색 ─────────────────────────────────────────────────────
     // 변경 영향은 탐색 **전에** 계산해야 순서에 반영된다.
     const impact = computeChangeImpact(config);
@@ -481,6 +536,7 @@ export async function runQa(
       explored,
       evidences: ctx.listEvidences(),
       makeProvider: options.createProvider ?? createProvider,
+      ready: aiReady,
     });
 
     for (const issue of enriched.issues) {

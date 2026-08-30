@@ -1,5 +1,4 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import { resolveClaudeCli, runClaude, searchedLocations } from "./claude-cli.js";
 import { z } from "zod";
 import type {
   AiProvider,
@@ -29,8 +28,6 @@ import {
   visualAnalysisPrompt,
   type Prompt,
 } from "./prompts.js";
-
-const run = promisify(execFile);
 
 /**
  * Claude Provider (PoC: Claude Code CLI).
@@ -62,27 +59,37 @@ export class ClaudeProvider implements AiProvider {
       remediation: null,
     };
 
+    /*
+     * PATH 에 없어도 설치되어 있을 수 있다. Electron 앱은 로그인 셸을 거치지 않아
+     * 사용자 터미널의 PATH 와 다르다 — 터미널에서는 되는데 앱에서는 안 되는 상황이
+     * 정상적으로 생긴다(실측). 그래서 알려진 설치 위치까지 찾아본다.
+     */
+    const exe = resolveClaudeCli();
+    if (!exe) {
+      return {
+        ...base,
+        detail: "Claude Code CLI를 찾지 못했습니다.",
+        remediation:
+          "Claude Code를 설치하고 로그인하세요. 이미 설치했다면 실행 파일 경로를 " +
+          "QA_CLAUDE_PATH 환경변수로 지정할 수 있습니다. 찾아본 곳: " +
+          searchedLocations().join(", "),
+      };
+    }
+
     try {
-      const { stdout } = await run("claude", ["--version"], {
-        timeout: 15_000,
-        windowsHide: true,
-      });
+      const { stdout } = await runClaude(exe, ["--version"], null, 20_000);
       return {
         ...base,
         available: true,
-        detail: `Claude Code 연결됨 · ${stdout.trim()}`,
+        detail: `Claude Code 연결됨 · ${stdout.trim()} (${exe})`,
       };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      const notFound = /ENOENT|not recognized|찾을 수 없습니다|command not found/i.test(message);
+
       return {
         ...base,
-        detail: notFound
-          ? "Claude Code CLI를 찾을 수 없습니다."
-          : `Claude Code 실행에 실패했습니다: ${message}`,
-        remediation: notFound
-          ? "Claude Code를 설치하고 로그인한 뒤 다시 시도하세요."
-          : "터미널에서 `claude --version` 이 동작하는지 확인하세요.",
+        detail: `Claude Code 실행에 실패했습니다: ${message}`,
+        remediation: `${exe} --version 이 동작하는지 확인하세요. 로그인이 필요할 수 있습니다.`,
       };
     }
   }
@@ -90,14 +97,18 @@ export class ClaudeProvider implements AiProvider {
   private async ask<T>(prompt: Prompt, schema: z.ZodType<T>): Promise<T> {
     return retryOnce(async (hint) => {
       const text = [SYSTEM_PROMPT, "", prompt.user, hint ? `\n${hint}` : ""].join("\n");
-      const args = ["-p", text, "--output-format", "json"];
+      /*
+       * 프롬프트는 **stdin** 으로 넘긴다. 인자로 넘기면 두 가지가 깨진다.
+       *   - Windows 명령줄 상한(약 32KB). 화면 DOM 이 들어간 프롬프트는 쉽게 넘는다.
+       *   - 프롬프트에는 대상 사이트에서 온 텍스트가 들어 있다. 따옴표 하나로
+       *     인자 경계가 무너진다.
+       */
+      const args = ["-p", "--output-format", "json"];
       if (this.config.model) args.push("--model", this.config.model);
 
-      const { stdout } = await run("claude", args, {
-        timeout: this.config.timeoutMs,
-        maxBuffer: 8 * 1024 * 1024,
-        windowsHide: true,
-      });
+      const exe = resolveClaudeCli();
+      if (!exe) throw new Error("Claude Code CLI를 찾지 못했습니다.");
+      const { stdout } = await runClaude(exe, args, text, this.config.timeoutMs);
 
       // `--output-format json` 은 응답 텍스트를 result 필드에 담아 준다.
       // 그 안의 내용이 우리가 원하는 JSON이다.
