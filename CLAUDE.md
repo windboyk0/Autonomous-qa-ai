@@ -11,6 +11,8 @@
 | `packages/shared/src/*.ts` | **데이터 계약.** 모든 모듈이 여기 타입으로 대화한다 |
 | `packages/fixture-admin/KNOWN_BUGS.md` | 탐지 채점 정답지 |
 | `packages/fixture-admin/KNOWN_SCREENS.md` | 탐색 채점 정답지 |
+| `packages/fixture-src/KNOWN_SOURCE_BUGS.md` | **소스** 검출 채점 정답지 |
+| `packages/fixture-src/KNOWN_ENDPOINTS.md` | 엔드포인트 ↔ 소스 매핑 정답지 |
 | `docs/archive/` | 참고용 원본 스냅샷. **스펙 아님** |
 
 ## 0. 목적

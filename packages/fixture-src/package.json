@@ -1,0 +1,20 @@
+{
+  "name": "@qa/fixture-src",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "정답을 아는 목(mock) 프로젝트 소스. 의도적 결함 12개와 엔드포인트 매핑 정답지가 들어 있다. 빌드·실행하지 않고 읽히기만 한다.",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  }
+}

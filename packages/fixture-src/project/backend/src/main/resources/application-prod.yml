@@ -1,0 +1,10 @@
+# SRC-05: 운영 설정에 평문 비밀번호가 들어 있다.
+# 스캐너는 이 파일의 '값'을 읽지 않는다. 키 이름만으로 결함을 보고한다.
+spring:
+  datasource:
+    url: jdbc:postgresql://prod-db.internal:5432/groupware
+    username: groupware_prod
+    password: CHANGE_ME_fixture_only
+  jpa:
+    hibernate:
+      ddl-auto: update

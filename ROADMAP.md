@@ -338,13 +338,35 @@ IssueCandidate[] → judge(dedup·severity·priority) → Issue[] → report.md
 
 Worker 격리, `EngineEvent` JSON Lines, Pause/Stop, 증적 트리, 리포트 17장 목차도 그대로다.
 
-## Phase 8 — 소스 fixture와 정답지
+## Phase 8 — 소스 fixture와 정답지 ✅
 
-- [ ] `packages/fixture-src` — 의도적 결함이 심긴 작은 프로젝트 (Spring Boot + React)
-- [ ] `KNOWN_SOURCE_BUGS.md` — 결함 목록과 파일·줄 번호 (채점 정답지)
-- [ ] `KNOWN_ENDPOINTS.md` — 엔드포인트 ↔ 컨트롤러 매핑 정답지
+- [x] `packages/fixture-src/project` — 의도적 결함 12건 (Spring Boot 3 + React 18)
+- [x] `KNOWN_SOURCE_BUGS.md` + `src/known-bugs.ts` — 결함 정답지
+- [x] `KNOWN_ENDPOINTS.md` + `src/known-endpoints.ts` — 엔드포인트·호출지점 정답지
+- [x] 앵커 방식 — 줄 번호를 손으로 적지 않는다
 
-**DoD**: fixture 프로젝트가 존재하고, 정답지의 모든 항목이 파일·줄로 특정된다.
+**DoD 결과 — 통과 (테스트 258건 누계)**
+
+| 검증 | 결과 |
+|---|---|
+| 결함 12건이 실제 파일의 **정확히 한 줄**로 특정 | 12/12 |
+| 엔드포인트 5건 · 호출지점 3건 특정 | 8/8 |
+| 실행 QA가 원리적으로 못 찾는 결함이 과반 | **8 / 12** |
+| 문서 정답지와 코드 정답지 개수 일치 | 일치 |
+
+### Phase 8에서 확정된 설계
+
+- **정답지에 줄 번호를 손으로 적지 않는다.** 그 줄에만 나타나는 문자열(앵커)로 특정하고
+  줄 번호는 읽을 때 찾는다. 앵커가 0줄이거나 2줄 이상이면 테스트가 깨진다.
+  손으로 적으면 fixture를 한 줄 고칠 때마다 정답지 전체가 조용히 낡는다.
+- **미열람 대상은 정답지에 넣지 않는다.** `secrets.properties` 는 스캐너가 값을
+  읽어서는 안 되는 파일이고, 그것이 결함으로 보고되면 **그게 오탐**이다.
+  대신 `application-prod.yml` 의 평문 비밀번호(SRC-05)는 **키 이름만으로** 보고할 수 있다 —
+  값을 읽을 이유가 없다는 것을 보이는 사례다.
+- **주석을 읽고 정답을 맞히는 것은 부정행위다.** fixture 소스에는 `SRC-xx` 주석이 있다.
+  검출기가 이를 근거로 삼으면 안 되며, Phase 9에서 확인하는 테스트를 둔다.
+- **12건 중 8건이 실행 QA로 원리적으로 못 찾는 것**이어야 모드를 나눈 의미가 있다.
+  이 비율 자체를 테스트로 못박았다.
 
 **왜 먼저인가.** 1부에서 `fixture-admin` + `KNOWN_BUGS.md` 가 없었으면 탐지율도
 오탐률도 잴 수 없었다. 소스 QA도 똑같다. 정답지 없이 만든 검출기는 채점이 안 되고,
