@@ -12,7 +12,52 @@ body {
 
 .app {
   display: flex;
+  flex-direction: column;
   min-height: 100vh;
+}
+
+/* 사이드바와 본문. 제목 줄 아래에 가로로 놓인다. */
+.workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+/*
+ * 제목 줄.
+ *
+ * OS 가 그리던 흰 제목 표시줄과 메뉴바를 없앤 자리다. `app-region: drag` 가
+ * 있어야 창을 끌어 옮길 수 있고, 그 안의 버튼에는 `no-drag` 를 줘야 눌린다.
+ * 오른쪽은 OS 가 창 조작 버튼을 얹는 자리라 비워 둔다.
+ */
+.titlebar {
+  height: 36px;
+  flex: 0 0 36px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-bottom: 1px solid #1e293b;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+.titlebar-name {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+.titlebar-run {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #16a34a;
+  color: #fff;
+}
+.titlebar button,
+.titlebar a {
+  -webkit-app-region: no-drag;
 }
 
 /*

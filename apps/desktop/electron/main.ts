@@ -1,5 +1,5 @@
 import { join, resolve } from "node:path";
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, Menu } from "electron";
 import { IpcLayer } from "./ipc.js";
 import { Store } from "./store.js";
 
@@ -24,11 +24,24 @@ let store: Store | null = null;
 let ipc: IpcLayer | null = null;
 
 function createWindow(): void {
+  /*
+   * 제목 표시줄과 메뉴바가 흰색으로 남아 본문과 따로 놀았다.
+   *
+   * 둘 다 Chromium 이 OS 테마로 그리는 것이라 CSS 로는 손댈 수 없다.
+   *   - 제목 표시줄: titleBarOverlay 로 색을 지정한다. 창 조작 버튼(최소화·닫기)은
+   *     OS 가 그리므로 symbolColor 까지 줘야 어두운 바탕에서 보인다.
+   *   - 메뉴바: File/Edit/View/Window/Help 는 Electron 기본 메뉴다. 이 앱은
+   *     왼쪽에 자체 내비게이션이 있어 쓸 일이 없다. 없애면 흰 줄도 같이 사라진다.
+   *     (개발자 도구는 아래에서 F12 로 남겨 둔다)
+   */
   window = new BrowserWindow({
     width: 1280,
     height: 860,
     show: false,
     title: "관리자웹 자율 QA",
+    backgroundColor: "#0f172a",
+    titleBarStyle: "hidden",
+    titleBarOverlay: { color: "#0f172a", symbolColor: "#e2e8f0", height: 36 },
     webPreferences: {
       // preload는 CJS 번들이라 sandbox를 켜도 되지만, node-sqlite3-wasm 등
       // main 쪽 모듈이 sandbox 환경에서 제약을 받으므로 끈다.
@@ -41,6 +54,19 @@ function createWindow(): void {
   });
 
   window.once("ready-to-show", () => window?.show());
+
+  /*
+   * 메뉴를 없애면 F12·Ctrl+Shift+I 단축키도 같이 사라진다.
+   * 사용자 PC 에서 문제가 났을 때 콘솔을 볼 방법은 남겨 둔다.
+   */
+  window.webContents.on("before-input-event", (event, input) => {
+    const devtools =
+      input.key === "F12" || (input.control && input.shift && input.key.toLowerCase() === "i");
+    if (input.type === "keyDown" && devtools) {
+      window?.webContents.toggleDevTools();
+      event.preventDefault();
+    }
+  });
 
   const devServer = process.env.VITE_DEV_SERVER_URL;
   if (devServer) {
@@ -55,6 +81,10 @@ function createWindow(): void {
 }
 
 app.whenReady().then(() => {
+  // 기본 메뉴(File/Edit/View/Window/Help)를 없앤다. 이 앱의 내비게이션은 왼쪽에 있고,
+  // 그 흰 줄 하나 때문에 화면 위쪽이 본문과 따로 놀았다.
+  Menu.setApplicationMenu(null);
+
   store = new Store(join(app.getPath("userData"), "qa.db"));
   ipc = new IpcLayer(store, () => window, workspaceRoot());
   ipc.register();

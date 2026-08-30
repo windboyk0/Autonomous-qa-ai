@@ -62,6 +62,17 @@ export function App() {
 
   return (
     <div className="app">
+      {/*
+        제목 표시줄을 우리가 그린다.
+        titleBarStyle: "hidden" 이라 OS 는 창 조작 버튼만 오른쪽에 얹는다.
+        이 줄이 없으면 **창을 드래그해 옮길 수 없다** — 끌 손잡이가 사라진다.
+      */}
+      <div className="titlebar">
+        <span className="titlebar-name">관리자웹 자율 QA</span>
+        {running && <span className="titlebar-run">실행 중</span>}
+      </div>
+
+      <div className="workspace">
       <nav className="side">
         <h1>자율 QA</h1>
         {NAV.map((item) => (
@@ -86,6 +97,7 @@ export function App() {
         {screen === "report" && <Report />}
         {screen === "history" && <History />}
       </main>
+      </div>
     </div>
   );
 }
