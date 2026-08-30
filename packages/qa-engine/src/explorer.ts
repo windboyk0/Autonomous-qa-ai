@@ -19,6 +19,7 @@ import { readState } from "./fingerprint.js";
 import { pathTemplate, queryKeys, sha1 } from "./normalize.js";
 import { hasLoginForm, login } from "./login.js";
 import { NO_CONTROL, type RunControl } from "./control.js";
+import { impactScore } from "./source/change-impact.js";
 
 /**
  * Explorer Agent.
@@ -86,6 +87,14 @@ export class Explorer {
     private readonly collector: Collector,
     private readonly config: RunConfig,
     private readonly control: RunControl = NO_CONTROL,
+    /**
+     * 이번 변경이 닿아 보이는 화면을 먼저 보게 하는 힌트.
+     *
+     * **대상을 줄이지 않고 순서만 바꾼다.** 추정이 틀려도 잃는 것은 순서뿐이고,
+     * 예산이 남는 한 나머지 화면도 전부 본다. 줄이면 못 본 것이 생기는데
+     * 그 사실이 리포트에 "정상"으로 읽힌다.
+     */
+    private readonly impactHints: readonly string[] = [],
   ) {}
 
   private get allowedOrigins(): string[] {
@@ -305,6 +314,28 @@ export class Explorer {
     await this.navigateTo(plan);
   }
 
+  /**
+   * 다음에 볼 화면을 꺼낸다.
+   *
+   * 힌트가 없으면 넣은 순서 그대로다(기존 동작, 결정성 유지).
+   * 힌트가 있으면 점수가 가장 높은 것을 먼저 꺼내되, 점수가 같으면
+   * 역시 넣은 순서를 지킨다 — 여기서 순서가 흔들리면 회귀 테스트가 불가능해진다.
+   */
+  private takeNextPlan(): Plan {
+    if (this.impactHints.length === 0) return this.queue.shift()!;
+
+    let bestAt = 0;
+    let best = impactScore(this.queue[0]!.url, this.impactHints);
+    for (let i = 1; i < this.queue.length; i += 1) {
+      const score = impactScore(this.queue[i]!.url, this.impactHints);
+      if (score > best) {
+        best = score;
+        bestAt = i;
+      }
+    }
+    return this.queue.splice(bestAt, 1)[0]!;
+  }
+
   async explore(startPlan: Plan): Promise<ExploreResult> {
     this.enqueue(startPlan);
 
@@ -323,7 +354,7 @@ export class Explorer {
         break;
       }
 
-      const plan = this.queue.shift()!;
+      const plan = this.takeNextPlan();
       const navError = await this.navigateTo(plan);
       if (navError) {
         this.limits.push(`${plan.url} 도달 실패: ${navError}`);

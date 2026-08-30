@@ -39,6 +39,20 @@ export const RunSummary = z.object({
   aiFailureReason: z.string().nullable().default(null),
   /** 예산 소진·위험도 차단 등으로 탐색하지 못한 영역 */
   explorationLimits: z.array(z.string()),
+  /**
+   * 이번 변경이 닿는 영역. Change Impact 를 쓰지 않았으면 null.
+   * **추정이라는 사실을 숨기지 않기 위해** 근거(notes)를 같이 싣는다.
+   */
+  changeImpact: z
+    .object({
+      comparedWith: z.string(),
+      changedFiles: z.array(z.string()),
+      endpoints: z.array(z.string()),
+      apiPaths: z.array(z.string()),
+      notes: z.array(z.string()),
+    })
+    .nullable()
+    .default(null),
   unverifiedAreas: z.array(z.string()),
 });
 export type RunSummary = z.infer<typeof RunSummary>;

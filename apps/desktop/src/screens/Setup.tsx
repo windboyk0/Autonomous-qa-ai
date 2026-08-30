@@ -14,6 +14,7 @@ export function Setup() {
 
   const [mode, setMode] = useState<"runtime" | "source" | "integrated">("runtime");
   const [sourceDir, setSourceDir] = useState("");
+  const [changeImpact, setChangeImpact] = useState(false);
   const [name, setName] = useState("");
   const [targetUrl, setTargetUrl] = useState("http://localhost:3100");
   const [startPath, setStartPath] = useState("/");
@@ -98,7 +99,10 @@ export function Setup() {
       mode,
       // 실행이 없는 모드에 URL을 넘기면 스키마가 거부한다. 모드가 요구하는 것만 채운다.
       targetUrl: mode === "source" ? "" : targetUrl,
-      source: { rootDir: mode === "runtime" ? "" : sourceDir },
+      source: {
+        rootDir: mode === "runtime" ? "" : sourceDir,
+        changeImpact: changeImpact && sourceDir.trim() !== "",
+      },
       startPath,
       headless,
       login: { enabled: useLogin, username, password: "" },
@@ -292,6 +296,19 @@ export function Setup() {
           >
             폴더 선택
           </button>
+          <label className="row">
+            <input
+              type="checkbox"
+              checked={changeImpact}
+              onChange={(e) => setChangeImpact(e.target.checked)}
+              data-testid="cfg-change-impact"
+            />
+            <span>이번 변경(git)이 닿는 화면부터 본다</span>
+          </label>
+          <p className="hint">
+            탐색 <b>순서</b>만 바꿉니다. 대상을 줄이지 않으므로 예산이 남는 한 나머지 화면도
+            전부 봅니다.
+          </p>
           <p className="hint">
             소스는 읽기만 합니다. 빌드·테스트는 실행하지 않고, <code>.env</code>·인증서 파일은
             열지 않습니다.

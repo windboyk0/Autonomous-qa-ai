@@ -127,6 +127,13 @@ export const SourceConfig = z.object({
   /** 프로젝트 루트 절대 경로 */
   rootDir: z.string().default(""),
   aiUpload: SourceAiUpload.default("snippets"),
+  /**
+   * Change Impact 비교 기준 (git). 비우면 커밋하지 않은 변경을 보고,
+   * 작업 트리가 깨끗하면 마지막 커밋으로 물러선다.
+   * `changeImpact` 가 꺼져 있으면 아무것도 하지 않는다.
+   */
+  changeImpact: z.boolean().default(false),
+  changeBase: z.string().default(""),
   /** 스캔 상한. 예산 없는 스캔은 큰 저장소에서 끝나지 않는다. */
   maxFiles: z.number().int().positive().default(5_000),
   maxFileBytes: z.number().int().positive().default(512 * 1024),

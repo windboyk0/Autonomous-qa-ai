@@ -20,6 +20,8 @@ import type { RunContext } from "./run-context.js";
 import { Explorer, makeStartPlan, type ExploreResult } from "./explorer.js";
 import { judge } from "./judge.js";
 import { runSourceQa, type SourceQaOutcome } from "./source/run-source.js";
+import { computeImpact, gitChangedFiles, type ChangeImpact } from "./source/change-impact.js";
+import { scanProject } from "./source/scan.js";
 import { renderReport } from "./report.js";
 import { AiGuard, createProvider, enrich, passthrough, type EnrichResult } from "./ai/index.js";
 import { NO_CONTROL, type RunControl } from "./control.js";
@@ -163,6 +165,7 @@ function buildSummary(input: {
   leftovers?: string[];
   stopped?: boolean;
   source?: SourceQaOutcome | null;
+  impact?: ChangeImpact | null;
 }): RunSummary {
   const { runId, config, startedAt, explored, issues } = input;
   const finishedAt = new Date();
@@ -190,6 +193,15 @@ function buildSummary(input: {
     aiStatus: input.ai?.status ?? "not_used",
     aiFailureReason: input.ai?.failureReason ?? null,
     explorationLimits: explored.limits,
+    changeImpact: input.impact
+      ? {
+          comparedWith: input.impact.changed.comparedWith,
+          changedFiles: input.impact.changed.files,
+          endpoints: input.impact.endpoints.map((e) => `${e.method} ${e.path}`),
+          apiPaths: input.impact.apiPaths,
+          notes: input.impact.notes,
+        }
+      : null,
     unverifiedAreas: [
       ...unverifiedAreas(explored.actionResults, config),
       // 소스 QA 가 하지 않은 것도 같은 자리에 적는다. 모드가 달라도 "안 본 것"은 하나다.
@@ -210,6 +222,35 @@ function buildSummary(input: {
  * 이 함수만 직접 호출할 수 있게 하기 위해서다.
  */
 /**
+ * 이번 변경이 닿는 영역을 계산한다.
+ *
+ * 스캔을 한 번 더 도는 비용이 있지만, 소스 QA 를 켜지 않은 실행 QA 에서도
+ * 이 기능만 쓰고 싶을 수 있다. 그 경우가 오히려 흔하다.
+ */
+function computeChangeImpact(config: RunConfig): ChangeImpact | null {
+  if (!config.source.changeImpact) return null;
+  const rootDir = config.source.rootDir;
+  if (rootDir.trim() === "") return null;
+
+  const changed = gitChangedFiles(rootDir, config.source.changeBase);
+  if (changed.error) log("warn", `변경 영향 분석 불가: ${changed.error}`);
+
+  const scan = scanProject(rootDir, {
+    maxFiles: config.source.maxFiles,
+    maxFileBytes: config.source.maxFileBytes,
+    maxTotalBytes: config.source.maxTotalBytes,
+  });
+  const impact = computeImpact(rootDir, scan, changed);
+
+  log(
+    "info",
+    `변경 영향: 파일 ${changed.files.length}개(${changed.comparedWith || "비교 불가"}) → ` +
+      `엔드포인트 ${impact.endpoints.length}개 · 힌트 ${impact.hints.length}개`,
+  );
+  return impact;
+}
+
+/**
  * 소스 전용 Run.
  *
  * 탐색 그래프가 없으므로 빈 결과를 만들어 넘긴다. 리포트 목차는 하나뿐이고,
@@ -222,6 +263,7 @@ async function runSourceOnly(
   options: RunOptions,
 ): Promise<RunOutcome> {
   const source = runSourceQa(config, ctx);
+  const impact = computeChangeImpact(config);
 
   const explored: ExploreResult = {
     graph: { nodes: [], edges: [] },
@@ -253,6 +295,7 @@ async function runSourceOnly(
     issues: enriched.issues,
     ai: enriched,
     source,
+    impact,
     stopped: options.control?.stopped ?? false,
   });
 
@@ -345,7 +388,16 @@ export async function runQa(
     }
 
     // ── 자율 탐색 ─────────────────────────────────────────────────────
-    const explorer = new Explorer(session.page, ctx, collector, config, options.control ?? NO_CONTROL);
+    // 변경 영향은 탐색 **전에** 계산해야 순서에 반영된다.
+    const impact = computeChangeImpact(config);
+    const explorer = new Explorer(
+      session.page,
+      ctx,
+      collector,
+      config,
+      options.control ?? NO_CONTROL,
+      impact?.hints ?? [],
+    );
     const explored = await explorer.explore(makeStartPlan(result.landedUrl));
 
     ctx.writeJson("actions", "graph.json", explored.graph);
@@ -419,6 +471,7 @@ export async function runQa(
       ai: enriched,
       crud: crudOutcome.results,
       source: sourceOutcome,
+      impact,
       leftovers: leftovers.map((r) => `${r.marker} (${r.screen}) — ${r.cleanupError ?? "사유 미상"}`),
       stopped: options.control?.stopped ?? false,
     });

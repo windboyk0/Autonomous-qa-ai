@@ -190,6 +190,45 @@ export function renderReport(input: {
         : `AI 분석을 사용할 수 없어 룰 기반 결과만 담았습니다. (${summary.aiFailureReason ?? "사유 미상"})`,
   );
 
+  // ── 3-1. 이번 변경이 닿는 영역 ──────────────────────────────────────
+  /*
+   * 추정이라는 사실을 숨기지 않는다. 근거(notes)를 같이 실어야
+   * 개발자가 "왜 이 화면부터 봤는지"를 스스로 판단할 수 있다.
+   */
+  if (summary.changeImpact) {
+    const ci = summary.changeImpact;
+    push("## 3-1. 이번 변경이 닿는 영역", "");
+    push("| 항목 | 값 |", "|---|---|");
+    push(`| 비교 기준 | ${ci.comparedWith || "비교하지 못함"} |`);
+    push(`| 바뀐 파일 | ${ci.changedFiles.length}개 |`);
+    push(`| 닿는 엔드포인트 | ${ci.endpoints.length}개 |`, "");
+    if (ci.changedFiles.length > 0) {
+      push("**바뀐 파일**");
+      push(...ci.changedFiles.slice(0, 30).map((f) => `- ${f}`));
+      if (ci.changedFiles.length > 30)
+        push(`- … 외 ${ci.changedFiles.length - 30}개`);
+      push("");
+    }
+    if (ci.endpoints.length > 0) {
+      push("**닿는 엔드포인트**");
+      push(...ci.endpoints.map((e) => `- ${e}`));
+      push("");
+    }
+    if (ci.apiPaths.length > 0) {
+      push("**바뀐 화면이 부르는 API**");
+      push(...ci.apiPaths.map((p) => `- ${p}`));
+      push("");
+    }
+    if (ci.notes.length > 0) {
+      push("**판단 근거와 한계**");
+      push(...ci.notes.map((n) => `- ${n}`));
+      push("");
+    }
+    push(
+      "이 영역을 **먼저 탐색**했습니다. 대상을 줄이지는 않았으므로 나머지 화면도 예산이 남는 한 전부 봅니다.",
+      "",
+    );
+  }
   // ── 4. CRUD 결과 ────────────────────────────────────────────────────
   push(
     "## 4. CRUD 결과",
