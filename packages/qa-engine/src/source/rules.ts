@@ -45,7 +45,12 @@ function* matches(text: string, re: RegExp): Generator<RegExpExecArray> {
  * SQL 문자열에 변수를 이어 붙이는 모양만 잡는다.
  * 리터럴이 SQL 키워드로 시작하고 `+` 뒤에 식별자가 오는 경우로 한정한다.
  */
-const SQL_CONCAT = /"(?:\s*)(SELECT|INSERT|UPDATE|DELETE)\b[^"]*"\s*\+\s*[A-Za-z_$]/i;
+/**
+ * SQL 키워드로 **시작만** 하는 문자열은 SQL 이 아니다.
+ * 실측에서 `log("warn", "UPDATE 건너뜀 — " + record.marker)` 가 걸렸다.
+ * 진짜 SQL 은 FROM·INTO·SET·WHERE 같은 절이 함께 온다.
+ */
+const SQL_CONCAT = /"(?:\s*)(SELECT|INSERT|UPDATE|DELETE)\b[^"]*\b(FROM|INTO|SET|WHERE|VALUES|JOIN)\b[^"]*"\s*\+\s*[A-Za-z_$]/i;
 
 export function findSqlConcat(file: string, text: string): SourceFinding[] {
   const out: SourceFinding[] = [];

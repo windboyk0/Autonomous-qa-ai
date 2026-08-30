@@ -290,3 +290,67 @@ describe("Phase 9 — 소스 모드 end-to-end", () => {
     rmSync(dir, { recursive: true, force: true });
   }, 60_000);
 });
+
+/**
+ * 실측 회귀. 이 저장소 자체에 돌렸더니 스캐너가 `release/win-unpacked` 안의
+ * **동봉 Chromium 소스**까지 읽고 결함을 보고했다. 남의 코드에서 나온 결함은 잡음이다.
+ */
+describe("Phase 9 — .gitignore 를 존중한다", () => {
+  it("git 이 무시하는 파일은 읽지 않는다", async () => {
+    const { execFileSync } = await import("node:child_process");
+    const { mkdirSync } = await import("node:fs");
+    const { scanProject } = await import("./source/scan.js");
+
+    const repo = mkdtempSync(join(tmpdir(), "qa-gitignore-"));
+    const g = (args: string[]) => execFileSync("git", args, { cwd: repo, stdio: "ignore" });
+    writeFileSync(join(repo, ".gitignore"), "release/\n", "utf8");
+    mkdirSync(join(repo, "release"), { recursive: true });
+    mkdirSync(join(repo, "src"), { recursive: true });
+    writeFileSync(join(repo, "release", "vendor.js"), 'const API_TOKEN = "abcdefgh123";\n', "utf8");
+    writeFileSync(join(repo, "src", "app.ts"), "export const x = 1;\n", "utf8");
+    g(["init", "-q"]);
+    g(["config", "user.email", "f@example.invalid"]);
+    g(["config", "user.name", "f"]);
+    g(["add", "-A"]);
+    g(["commit", "-q", "-m", "base"]);
+
+    const scan = scanProject(repo, {
+      maxFiles: 1000,
+      maxFileBytes: 512 * 1024,
+      maxTotalBytes: 8 * 1024 * 1024,
+    });
+    expect(scan.files.map((f) => f.path)).toContain("src/app.ts");
+    expect(scan.files.map((f) => f.path)).not.toContain("release/vendor.js");
+
+    rmSync(repo, { recursive: true, force: true });
+  });
+
+  it("Git 저장소가 아니면 그 한계를 적는다", async () => {
+    const { scanProject } = await import("./source/scan.js");
+    const plain = mkdtempSync(join(tmpdir(), "qa-nogit-scan-"));
+    writeFileSync(join(plain, "a.ts"), "export const x = 1;\n", "utf8");
+    const scan = scanProject(plain, {
+      maxFiles: 100,
+      maxFileBytes: 512 * 1024,
+      maxTotalBytes: 1024 * 1024,
+    });
+    expect(scan.files.map((f) => f.path)).toContain("a.ts");
+    expect(scan.limits.join("\n")).toContain(".gitignore");
+    rmSync(plain, { recursive: true, force: true });
+  });
+});
+
+/** 실측 회귀: SQL 키워드로 시작만 하는 로그 문자열이 주입으로 잡혔다. */
+describe("Phase 9 — SQL 룰 정밀도", () => {
+  it("SQL 키워드로 시작하는 로그 문자열은 결함이 아니다", async () => {
+    const { findSqlConcat } = await import("./source/rules.js");
+    const text = 'log("warn", "UPDATE 건너뜀 — " + record.marker);';
+    expect(findSqlConcat("x.ts", text)).toEqual([]);
+  });
+
+  it("절 키워드가 함께 오면 잡는다", async () => {
+    const { findSqlConcat } = await import("./source/rules.js");
+    const text = 'String sql = "SELECT * FROM users WHERE name = " + keyword;';
+    expect(findSqlConcat("x.java", text).length).toBe(1);
+  });
+});

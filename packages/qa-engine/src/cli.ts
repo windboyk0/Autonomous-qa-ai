@@ -35,10 +35,20 @@ function parseArgs(argv: string[]): RawArgs {
 }
 
 const USAGE = `
-사용법: qa --url <URL> [옵션]
+사용법: qa --url <URL> [옵션]          실행 QA
+       qa --source <DIR> [옵션]       소스 QA
+       qa --url <URL> --source <DIR>  통합 QA
 
-필수
+대상 (모드는 준 것에 따라 정해진다)
   --url <URL>              대상 관리자웹 주소
+  --source <DIR>           대상 프로젝트 폴더
+
+소스 QA
+  --change-impact          이번 변경(git)이 닿는 화면부터 본다
+  --change-base <REF>      비교 기준. 비우면 커밋하지 않은 변경
+  --ai-upload <none|snippets|files>  소스가 AI로 나가는 범위. 기본 snippets
+  --allow-test             이 프로젝트의 테스트·린트를 실행한다 (동의)
+  --allow-build            이 프로젝트의 빌드를 실행한다 (동의)
 
 로그인
   --user <ID>              로그인 아이디
@@ -109,10 +119,15 @@ async function resolvePassword(args: RawArgs): Promise<{ password: string; warni
 
 function buildConfig(args: RawArgs, password: string): RunConfig {
   const url = typeof args.url === "string" ? args.url : "";
-  if (!url) {
+  const sourceDir = typeof args.source === "string" ? args.source : "";
+
+  // 모드는 따로 받지 않는다. **무엇을 줬는지가 곧 모드다.**
+  // 플래그를 하나 더 두면 "--mode source 인데 --url 을 줬다" 같은 모순이 생긴다.
+  if (!url && !sourceDir) {
     process.stderr.write(USAGE + "\n");
     process.exit(2);
   }
+  const mode = url && sourceDir ? "integrated" : url ? "runtime" : "source";
 
   const str = (k: string, d = ""): string => (typeof args[k] === "string" ? (args[k] as string) : d);
   const num = (k: string, d: number): number => {
@@ -121,8 +136,17 @@ function buildConfig(args: RawArgs, password: string): RunConfig {
   };
 
   const parsed = RunConfig.safeParse({
-    projectName: str("name", new URL(url).host),
+    projectName: str("name", url ? new URL(url).host : sourceDir.split(/[\\/]/).pop() || "project"),
+    mode,
     targetUrl: url,
+    source: {
+      rootDir: sourceDir,
+      aiUpload: str("ai-upload", "snippets"),
+      changeImpact: args["change-impact"] === true,
+      changeBase: str("change-base"),
+      allowBuild: args["allow-build"] === true,
+      allowTest: args["allow-test"] === true,
+    },
     startPath: str("start-path", "/"),
     headless: args.headless === true,
     login: {

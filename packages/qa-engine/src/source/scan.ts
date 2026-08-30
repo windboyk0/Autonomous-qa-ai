@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { accessOf, type FileAccess } from "./secrets.js";
@@ -171,6 +172,32 @@ function findCommands(files: ScannedFile[], read: (p: string) => string): Projec
   return out;
 }
 
+/**
+ * Git 이 관리하는 파일 목록.
+ *
+ * `.gitignore` 를 직접 파싱하지 않는다. 규칙이 생각보다 복잡하고(부정 패턴,
+ * 디렉터리 한정, 중첩된 .gitignore), 틀리면 조용히 잘못된 범위를 읽는다.
+ * git 에게 물으면 정확하다.
+ *
+ * 실측에서 이것이 없어 `release/win-unpacked` 안의 **동봉 Chromium 소스**까지
+ * 읽고 결함을 보고했다. 남의 코드에서 나온 결함은 잡음이다.
+ */
+function gitTrackedFiles(rootDir: string): string[] | null {
+  try {
+    const out = execFileSync("git", ["ls-files", "--cached", "--others", "--exclude-standard"], {
+      cwd: rootDir,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+      timeout: 20_000,
+      maxBuffer: 32 * 1024 * 1024,
+    });
+    const files = out.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+    return files.length > 0 ? files : null;
+  } catch {
+    return null;
+  }
+}
+
 /** 프로젝트를 훑는다. 예산을 넘으면 멈추고 **넘었다는 사실을 기록한다.** */
 export function scanProject(rootDir: string, budget: ScanBudget): ProjectScan {
   const files: ScannedFile[] = [];
@@ -226,7 +253,39 @@ export function scanProject(rootDir: string, budget: ScanBudget): ProjectScan {
     }
   };
 
-  walk(rootDir);
+  const tracked = gitTrackedFiles(rootDir);
+  if (tracked) {
+    // git 이 아는 파일만 본다. 무시되는 것(빌드 산출물·동봉 자산)은 애초에 목록에 없다.
+    for (const rel of tracked.sort()) {
+      if (files.length >= budget.maxFiles) {
+        limits.push(`파일 수 상한(${budget.maxFiles}) 소진 — 이후 파일은 보지 않았습니다.`);
+        break;
+      }
+      const parts = rel.split("/");
+      if (parts.some((p) => SKIP_DIRS.has(p))) continue;
+      if (SKIP_EXT.has(extOf(rel))) continue;
+
+      let st;
+      try {
+        st = statSync(join(rootDir, rel));
+      } catch {
+        continue;
+      }
+      if (st.size > budget.maxFileBytes) continue;
+      if (totalBytes + st.size > budget.maxTotalBytes) {
+        limits.push(
+          `전체 크기 상한(${Math.round(budget.maxTotalBytes / 1024 / 1024)}MB) 소진 — 이후 파일은 보지 않았습니다.`,
+        );
+        break;
+      }
+      totalBytes += st.size;
+      files.push({ path: rel, bytes: st.size, lang: langOf(rel), access: accessOf(rel) });
+    }
+  } else {
+    // Git 저장소가 아니면 직접 훑는다. 이때는 무시 규칙을 알 수 없다.
+    limits.push("Git 저장소가 아니어서 .gitignore 를 적용하지 못했습니다. 빌드 산출물이 섞일 수 있습니다.");
+    walk(rootDir);
+  }
 
   const cache = new Map<string, string>();
   const read = (rel: string): string => {
