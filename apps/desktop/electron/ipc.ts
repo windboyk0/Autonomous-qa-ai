@@ -132,6 +132,37 @@ export class IpcLayer {
       return { credentials, enginePath, engineError, running: this.engine.running };
     });
 
+    /**
+     * 설치된 Ollama 모델 목록.
+     *
+     * 렌더러는 CSP(`default-src 'self'`)에 막혀 외부로 요청할 수 없다.
+     * main이 대신 물어보고 결과만 넘긴다 — 렌더러에 네트워크 권한을 주지 않는다.
+     */
+    ipcMain.handle("ai:ollamaModels", async (_e, baseUrl: string) => {
+      try {
+        const res = await fetch(new URL("/api/tags", baseUrl).toString(), {
+          signal: AbortSignal.timeout(5000),
+        });
+        if (!res.ok) return { ok: false as const, models: [], error: `HTTP ${res.status}` };
+        const body = (await res.json()) as { models?: Array<{ name: string; size?: number }> };
+        const models = (body.models ?? []).map((m) => ({
+          name: m.name,
+          // 화면에 크기를 같이 보여주면 어떤 모델을 고를지 판단하기 쉽다.
+          sizeGb: m.size ? Math.round((m.size / 1024 ** 3) * 10) / 10 : null,
+        }));
+        return { ok: true as const, models, error: null };
+      } catch (err) {
+        return {
+          ok: false as const,
+          models: [],
+          error:
+            err instanceof Error && /timeout|abort/i.test(err.message)
+              ? "Ollama가 응답하지 않습니다. 실행 중인지 확인하세요."
+              : `Ollama에 연결할 수 없습니다 (${baseUrl}).`,
+        };
+      }
+    });
+
     ipcMain.handle("run:start", (_e, input: StartRunInput) => this.startRun(input));
     ipcMain.handle("run:pause", () => this.engine.pause());
     ipcMain.handle("run:resume", () => this.engine.resume());

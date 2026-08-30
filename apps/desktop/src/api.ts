@@ -46,6 +46,13 @@ export interface QaApi {
     }): Promise<number>;
     remove(id: number): Promise<void>;
   };
+  ai: {
+    ollamaModels(baseUrl: string): Promise<{
+      ok: boolean;
+      models: Array<{ name: string; sizeGb: number | null }>;
+      error: string | null;
+    }>;
+  };
   run: {
     preflight(): Promise<Preflight>;
     start(input: {

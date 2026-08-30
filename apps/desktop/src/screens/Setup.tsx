@@ -38,6 +38,33 @@ export function Setup() {
 
   const [preflightError, setPreflightError] = useState<string | null>(null);
 
+  const [models, setModels] = useState<Array<{ name: string; sizeGb: number | null }>>([]);
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+
+  /** 설치된 Ollama 모델을 가져온다. 실패해도 직접 입력할 수 있게 둔다. */
+  const loadModels = async () => {
+    setModelsLoading(true);
+    try {
+      const result = await qa().ai.ollamaModels(ollamaUrl);
+      setModels(result.models);
+      setModelsError(result.error);
+      // 아직 고른 모델이 없으면 첫 번째를 기본으로 잡아 준다.
+      if (!model && result.models[0]) setModel(result.models[0].name);
+    } catch (err) {
+      setModels([]);
+      setModelsError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setModelsLoading(false);
+    }
+  };
+
+  // Ollama를 고르거나 주소를 바꾸면 목록을 다시 가져온다.
+  useEffect(() => {
+    if (provider !== "ollama") return;
+    void loadModels();
+  }, [provider, ollamaUrl]);
+
   const loadPreflight = async () => {
     try {
       setPreflight(await qa().run.preflight());
@@ -112,6 +139,8 @@ export function Setup() {
     if (useLogin && !username.trim()) return "로그인을 쓰려면 아이디가 필요합니다.";
     if (useLogin && !password && !hasStoredPassword) return "비밀번호를 입력하세요.";
     if (del && !deleteConsent) return "삭제 테스트에 동의해야 시작할 수 있습니다.";
+    // 모델 없이 Ollama를 켜면 엔진이 헬스체크에서 떨어진다. 여기서 미리 막는다.
+    if (provider === "ollama" && !model.trim()) return "사용할 Ollama 모델을 선택하세요.";
     return null;
   })();
 
@@ -254,12 +283,50 @@ export function Setup() {
           <>
             <label>
               Ollama URL
-              <input value={ollamaUrl} onChange={(e) => setOllamaUrl(e.target.value)} />
+              <input
+                value={ollamaUrl}
+                onChange={(e) => setOllamaUrl(e.target.value)}
+                data-testid="cfg-ollama-url"
+              />
             </label>
             <label>
-              Model
-              <input value={model} onChange={(e) => setModel(e.target.value)} placeholder="qwen3.5:9b" />
+              모델
+              {models.length > 0 ? (
+                <select
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  data-testid="cfg-model"
+                >
+                  <option value="">모델을 선택하세요</option>
+                  {models.map((m) => (
+                    <option key={m.name} value={m.name}>
+                      {m.name}
+                      {m.sizeGb !== null ? ` (${m.sizeGb} GB)` : ""}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                // 목록을 못 받았을 때도 직접 입력할 수 있어야 한다.
+                <input
+                  value={model}
+                  onChange={(e) => setModel(e.target.value)}
+                  placeholder="qwen3.5:9b"
+                  data-testid="cfg-model"
+                />
+              )}
             </label>
+            <div className="flex items-center gap-2">
+              <button className="btn-ghost" onClick={() => void loadModels()} disabled={modelsLoading}>
+                {modelsLoading ? "조회 중…" : "모델 목록 새로고침"}
+              </button>
+              {modelsError ? (
+                <span className="hint text-red-600" data-testid="models-error">
+                  {modelsError}
+                </span>
+              ) : (
+                <span className="hint">설치된 모델 {models.length}개</span>
+              )}
+            </div>
           </>
         )}
         <p className="hint">AI는 덧붙이기만 합니다. 실패해도 룰 기반 리포트는 그대로 생성됩니다.</p>

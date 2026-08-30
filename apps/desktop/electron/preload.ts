@@ -13,6 +13,9 @@ const api = {
     save: (input: unknown) => ipcRenderer.invoke("projects:save", input),
     remove: (id: number) => ipcRenderer.invoke("projects:delete", id),
   },
+  ai: {
+    ollamaModels: (baseUrl: string) => ipcRenderer.invoke("ai:ollamaModels", baseUrl),
+  },
   run: {
     preflight: () => ipcRenderer.invoke("run:preflight"),
     start: (input: unknown) => ipcRenderer.invoke("run:start", input),
