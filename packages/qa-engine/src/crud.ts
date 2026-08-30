@@ -13,6 +13,8 @@ import type { RunContext } from "./run-context.js";
 import { analyzeForm, isFillable, type FormField, type FormInfo } from "./forms.js";
 import { TestDataLedger, isOwnedByQa, valueFor, type CreatedRecord } from "./testdata.js";
 import { sha1 } from "./normalize.js";
+import { discoverActions } from "./discover.js";
+import { OPEN_FORM_REASON } from "./classify.js";
 import type { RunControl } from "./control.js";
 
 /**
@@ -29,6 +31,40 @@ import type { RunControl } from "./control.js";
 
 const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const SUCCESS_TEXT = /(저장|등록|수정|삭제|완료|성공|처리)/;
+
+/** 등록 화면을 찾으려고 눌러 볼 화면 수와 버튼 수의 상한. 탐색을 다시 하는 것이 아니다. */
+const OPENER_SCREEN_LIMIT = 10;
+const OPENER_PER_SCREEN = 2;
+const OPENER_FORMS_ENOUGH = 3;
+
+/**
+ * 셀렉터 목록 전체를 한 범위 안으로 가둔다.
+ *
+ * `scope + " " + "a, b"` 로 쓰면 b 는 범위 밖에 남는다. 목록 화면에서 그러면
+ * **남의 행에 있는 삭제 버튼**을 누르게 된다.
+ */
+function scopedSelector(scope: string, shapes: string): string {
+  if (!scope) return shapes;
+  return shapes
+    .split(",")
+    .map((one) => scope + " " + one.trim())
+    .join(", ");
+}
+
+/** 목록에서 레코드 한 건의 행을 집는 방법들. 관리자웹마다 표 마크업이 다르다. */
+const ROW_SHAPES = ["tr", "li", '[role="row"]'];
+
+/** 수정·삭제 버튼을 찾는 방법. SPA 는 링크가 아니라 버튼인 경우가 많다. */
+const EDIT_SHAPES = ':is(a,button):has-text("수정"), :is(a,button):has-text("편집"), [data-testid*="edit"]';
+const DELETE_SHAPES = ':is(a,button):has-text("삭제"), [data-testid*="delete"]';
+
+/** 등록 폼 화면 1건. `opener` 가 있으면 그 버튼을 눌러야 폼이 열린다(SPA 모달). */
+interface FormScreen {
+  url: string;
+  screenName: string;
+  stateKey: string;
+  opener: { selector: string; label: string } | null;
+}
 
 /** 필수 필드 검증 탐침은 최대 3개까지만 한다. 폼마다 레코드가 그만큼 쌓인다. */
 const VALIDATION_PROBE_LIMIT = 3;
@@ -112,10 +148,123 @@ export class CrudTester {
    * 착각해 기존 실데이터를 수정해 버렸다. 수정은 Update 단계가 대장에 있는
    * 데이터에 대해서만 한다.
    */
-  private formScreens(graph: StateGraph): Array<{ url: string; screenName: string; stateKey: string }> {
+  private formScreens(graph: StateGraph): FormScreen[] {
     return graph.nodes
       .filter((n) => /\/(new|create|regist|write|add)(\/|$)/i.test(n.signals.pathTemplate))
-      .map((n) => ({ url: n.url, screenName: n.screenName, stateKey: n.stateKey }));
+      .map((n) => ({ url: n.url, screenName: n.screenName, stateKey: n.stateKey, opener: null }));
+  }
+
+  /**
+   * 주소로 못 찾은 등록 화면을 **버튼을 눌러** 찾는다.
+   *
+   * SPA 관리자웹에서 등록 화면은 `/new` 주소가 아니라 버튼 뒤의 모달인 경우가 많다.
+   * 실측에서 이것 때문에 "등록 화면을 찾지 못했습니다" 로 Create·Update·Delete 가
+   * 전부 미실행으로 끝났다.
+   *
+   * 누르는 대상은 분류기가 **폼 열기 버튼으로 판정한 것만**이다. denylist·위험 라벨은
+   * 애초에 이 사유를 받지 못하므로 여기까지 오지 않는다. 그래도 눌렀을 때 쓰기 요청이
+   * 관측되면 분류가 틀린 것이므로 기록을 남기고 그 버튼은 쓰지 않는다.
+   */
+  private async openerScreens(graph: StateGraph, already: FormScreen[]): Promise<FormScreen[]> {
+    const covered = new Set(already.map((f) => f.url));
+    const found: FormScreen[] = [];
+
+    for (const node of graph.nodes.slice(0, OPENER_SCREEN_LIMIT)) {
+      if (found.length + already.length >= OPENER_FORMS_ENOUGH) break;
+      if (covered.has(node.url)) continue;
+      if (this.control.stopped) break;
+
+      let actions;
+      try {
+        await this.page.goto(node.url, { waitUntil: "domcontentloaded" });
+        await this.page.waitForTimeout(this.config.budget.settleMs);
+        actions = await discoverActions(
+          this.page,
+          { stateKey: node.stateKey, screenName: node.screenName },
+          this.config.safety,
+        );
+      } catch {
+        continue;
+      }
+
+      const openers = actions
+        .filter((a) => a.risk === "SAFE" && a.riskReason.startsWith(OPEN_FORM_REASON))
+        .slice(0, OPENER_PER_SCREEN);
+
+      for (const opener of openers) {
+        const screen = await this.probeOpener(node, opener.selector, opener.label);
+        if (screen) {
+          found.push(screen);
+          break; // 화면당 하나면 충분하다
+        }
+      }
+    }
+    return found;
+  }
+
+  /** 버튼 하나를 눌러 보고 등록 폼이 열리는지 확인한다. */
+  private async probeOpener(
+    node: { url: string; screenName: string; stateKey: string },
+    selector: string,
+    label: string,
+  ): Promise<FormScreen | null> {
+    try {
+      await this.page.goto(node.url, { waitUntil: "domcontentloaded" });
+      await this.page.waitForTimeout(this.config.budget.settleMs);
+      await this.page.locator(selector).first().click({ timeout: 5000 });
+      await this.page.waitForTimeout(this.config.budget.settleMs);
+    } catch {
+      return null;
+    }
+
+    // 폼을 여는 버튼이라면 아무것도 쓰지 않았어야 한다.
+    const capture = await this.capture(node.screenName + " · " + label, node.stateKey);
+    const writes = writeRequests(capture.network);
+    if (writes.length > 0) {
+      const what = writes.map((w) => w.method + " " + w.endpointTemplate).join(", ");
+      log("warn", '"' + label + '" 은 폼을 여는 버튼으로 봤는데 쓰기 요청이 발생했습니다. 사용하지 않습니다.');
+      this.candidates.push(
+        candidate({
+          ruleId: "SAFETY-UNEXPECTED-WRITE",
+          title: '폼 열기로 분류한 버튼이 쓰기를 실행했습니다: "' + label + '"',
+          description:
+            node.screenName + ' 의 "' + label + '" 을 폼 여는 버튼으로 보고 눌렀으나 ' +
+            what + " 요청이 발생했습니다. 분류 규칙을 확인하고, 이 화면에 남은 데이터가 없는지 점검하세요.",
+          severity: "MEDIUM",
+          screenName: node.screenName,
+          stateKey: node.stateKey,
+          evidenceId: capture.evidenceIdByKind.screenshot ?? "",
+        }),
+      );
+      return null;
+    }
+
+    const form = await analyzeForm(this.page);
+    if (!form?.submitSelector || form.fields.length === 0) return null;
+    if (await this.holdsExistingData(form)) return null;
+
+    log("info", '등록 화면을 버튼으로 찾았습니다 — ' + node.screenName + ' > "' + label + '"');
+    return {
+      url: node.url,
+      screenName: node.screenName + " > " + label,
+      stateKey: node.stateKey,
+      opener: { selector, label },
+    };
+  }
+
+  /** 폼 화면을 연다. opener 가 있으면 버튼을 눌러야 폼이 나타난다. */
+  private async openFormScreen(screen: FormScreen): Promise<boolean> {
+    try {
+      await this.page.goto(screen.url, { waitUntil: "domcontentloaded" });
+      if (!screen.opener) return true;
+      await this.page.waitForTimeout(this.config.budget.settleMs);
+      await this.page.locator(screen.opener.selector).first().click({ timeout: 5000 });
+      await this.page.waitForTimeout(this.config.budget.settleMs);
+      return true;
+    } catch (err) {
+      log("warn", screen.screenName + ": 폼을 열지 못했습니다 — " + String(err));
+      return false;
+    }
   }
 
   /**
@@ -247,6 +396,38 @@ export class CrudTester {
     }
   }
 
+  /**
+   * 대장의 레코드를 화면에서 다시 찾는다.
+   *
+   * 저장 후 상세 화면으로 이동하는 관리자웹이면 그 주소를 그대로 쓴다.
+   * 모달로 등록하는 SPA 는 주소가 그대로라 상세 주소를 모르므로 목록으로 간다.
+   * **이때 페이지 전체에서 "수정"을 찾으면 남의 행을 누른다.** 반드시 표식이 들어 있는
+   * 행 안에서만 찾는다. 행을 못 찾으면 아무것도 하지 않는다.
+   */
+  private async locateRecord(
+    record: CreatedRecord,
+  ): Promise<{ scope: string; where: string } | null> {
+    const detailUrl = record.landedUrl;
+    const url = detailUrl ?? this.listUrlOf(record.createUrl);
+    try {
+      await this.page.goto(url, { waitUntil: "domcontentloaded" });
+      await this.page.waitForTimeout(this.config.budget.settleMs);
+    } catch {
+      return null;
+    }
+
+    const body = await this.page.locator("body").innerText().catch(() => "");
+    if (!isOwnedByQa(body) || !body.includes(record.marker)) return null;
+
+    if (detailUrl) return { scope: "", where: "상세 화면" };
+
+    for (const shape of ROW_SHAPES) {
+      const scope = shape + ':has-text("' + record.marker + '")';
+      if ((await this.page.locator(scope).count()) > 0) return { scope, where: "목록의 해당 행" };
+    }
+    return null;
+  }
+
   /** 폼 화면의 목록 URL 추정. `/surveys/new` → `/surveys` */
   private listUrlOf(formUrl: string): string {
     const url = new URL(formUrl);
@@ -257,8 +438,11 @@ export class CrudTester {
   }
 
   // ── CREATE ──────────────────────────────────────────────────────────
-  private async createOn(screen: { url: string; screenName: string; stateKey: string }): Promise<void> {
-    await this.page.goto(screen.url, { waitUntil: "domcontentloaded" });
+  private async createOn(screen: FormScreen): Promise<void> {
+    if (!(await this.openFormScreen(screen))) {
+      this.counts.CREATE.skipped += 1;
+      return;
+    }
     const form = await analyzeForm(this.page);
 
     if (!form || form.fields.length === 0) {
@@ -349,17 +533,15 @@ export class CrudTester {
    * 필수로 표시된 필드를 하나씩 비우고 저장해 본다. 그래도 저장되면 검증이 없는 것이다.
    * 한 번에 하나만 비워야 어느 필드의 검증이 빠졌는지 특정할 수 있다.
    */
-  private async probeValidation(
-    screen: { url: string; screenName: string; stateKey: string },
-    form: FormInfo,
-  ): Promise<void> {
+  private async probeValidation(screen: FormScreen, form: FormInfo): Promise<void> {
     const required = form.fields.filter((f) => f.required && isFillable(f)).slice(0, VALIDATION_PROBE_LIMIT);
     if (required.length === 0 || !form.submitSelector) return;
 
     for (const field of required) {
       if (this.control.stopped) return;
 
-      await this.page.goto(screen.url, { waitUntil: "domcontentloaded" });
+      // 모달 폼은 주소를 다시 열어도 닫힌 채라, 버튼을 눌러 다시 띄워야 한다.
+      if (!(await this.openFormScreen(screen))) return;
       const marker = this.ledger.nextMarker();
       await this.fill(form, marker, field.selector);
 
@@ -425,28 +607,20 @@ export class CrudTester {
 
   // ── UPDATE ──────────────────────────────────────────────────────────
   private async updateOn(record: CreatedRecord): Promise<void> {
-    const target = record.landedUrl;
-    if (!target) {
-      this.counts.UPDATE.skipped += 1;
-      return;
-    }
-
-    await this.page.goto(target, { waitUntil: "domcontentloaded" });
-
     // **대장에 있는 데이터인지 화면에서 다시 확인한다.** 여기서 확인하지 않으면
     // 실데이터를 수정할 수 있다.
-    const body = await this.page.locator("body").innerText().catch(() => "");
-    if (!isOwnedByQa(body)) {
+    const found = await this.locateRecord(record);
+    if (!found) {
       this.counts.UPDATE.skipped += 1;
-      log("warn", `UPDATE 건너뜀 — ${target} 에서 ${record.marker} 를 확인하지 못했습니다.`);
+      log("warn", "UPDATE 건너뜀 — " + record.marker + " 를 화면에서 확인하지 못했습니다.");
       return;
     }
 
-    // 상세 화면에서 수정 화면으로 가는 링크를 찾는다.
-    const editLink = this.page.locator('a:has-text("수정"), a:has-text("편집"), [data-testid*="edit"]').first();
+    const editSelector = scopedSelector(found.scope, EDIT_SHAPES);
+    const editLink = this.page.locator(editSelector).first();
     if ((await editLink.count()) === 0) {
       this.counts.UPDATE.skipped += 1;
-      this.notRun.UPDATE = "수정 화면으로 가는 링크를 찾지 못했습니다.";
+      this.notRun.UPDATE = found.where + "에서 수정 버튼을 찾지 못했습니다.";
       return;
     }
 
@@ -522,31 +696,16 @@ export class CrudTester {
    * `countAsTest` 가 참이면 Delete 테스트로 집계하고, 거짓이면 뒷정리로만 본다.
    */
   private async deleteRecord(record: CreatedRecord, countAsTest: boolean): Promise<boolean> {
-    const target = record.landedUrl;
-    if (!target) {
-      this.ledger.markCleaned(record.id, "상세 화면 주소를 알지 못해 삭제를 시도하지 못했습니다.");
-      return false;
-    }
-
-    try {
-      await this.page.goto(target, { waitUntil: "domcontentloaded" });
-    } catch (err) {
-      this.ledger.markCleaned(record.id, `상세 화면 이동 실패: ${String(err)}`);
-      return false;
-    }
-
-    const body = await this.page.locator("body").innerText().catch(() => "");
-    if (!isOwnedByQa(body)) {
-      // 이미 지워졌거나, 다른 데이터를 보고 있다. 어느 쪽이든 클릭하지 않는다.
+    // 이미 지워졌거나 다른 데이터를 보고 있으면 어느 쪽이든 클릭하지 않는다.
+    const found = await this.locateRecord(record);
+    if (!found) {
       this.ledger.markCleaned(record.id, "화면에서 AUTO-QA 표식을 확인하지 못해 삭제하지 않았습니다.");
       return false;
     }
 
-    const deleteButton = this.page
-      .locator('button:has-text("삭제"), [data-testid*="delete"]')
-      .first();
-    if ((await deleteButton.count()) === 0) {
-      this.ledger.markCleaned(record.id, "삭제 버튼을 찾지 못했습니다.");
+    const deleteSelector = scopedSelector(found.scope, DELETE_SHAPES);
+    if ((await this.page.locator(deleteSelector).count()) === 0) {
+      this.ledger.markCleaned(record.id, found.where + "에서 삭제 버튼을 찾지 못했습니다.");
       return false;
     }
 
@@ -554,8 +713,8 @@ export class CrudTester {
     this.page.once("dialog", (dialog) => void dialog.accept().catch(() => undefined));
 
     const observed = await this.submitAndObserve(
-      'button:has-text("삭제"), [data-testid*="delete"]',
-      `${record.screen} 삭제`,
+      deleteSelector,
+      record.screen + " 삭제",
       record.id,
     );
     const verdict = this.judgeWrite(observed);
@@ -648,8 +807,17 @@ export class CrudTester {
 
     if (!this.config.crud.create) {
       this.notRun.CREATE = "설정에서 꺼져 있습니다.";
+    } else {
+      // 주소에 /new 가 없는 SPA 는 버튼을 눌러야 등록 폼이 나온다.
+      if (screens.length < OPENER_FORMS_ENOUGH) {
+        screens.push(...(await this.openerScreens(graph, screens)));
+      }
+    }
+
+    if (!this.config.crud.create) {
+      // 위에서 사유를 적었다.
     } else if (screens.length === 0) {
-      this.notRun.CREATE = "등록 화면을 찾지 못했습니다.";
+      this.notRun.CREATE = "등록 화면을 찾지 못했습니다. 주소에도 /new 계열이 없고, 폼을 여는 버튼도 없었습니다.";
     } else {
       for (const screen of screens) {
         if (this.control.stopped) break;
@@ -676,7 +844,8 @@ export class CrudTester {
     if (!this.config.crud.update) {
       this.notRun.UPDATE = "설정에서 꺼져 있습니다.";
     } else {
-      const targets = this.ledger.all().filter((r) => !r.cleaned && r.landedUrl !== null);
+      // landedUrl 이 없어도 목록에서 표식으로 행을 찾을 수 있다(모달 등록).
+      const targets = this.ledger.all().filter((r) => !r.cleaned);
       if (targets.length === 0) {
         this.notRun.UPDATE = "수정할 QA 생성 데이터가 없습니다.";
       }
@@ -696,7 +865,8 @@ export class CrudTester {
     } else if (!this.config.crud.deleteConsent) {
       this.notRun.DELETE = "별도 삭제 동의가 없어 실행하지 않았습니다.";
     } else {
-      const targets = this.ledger.all().filter((r) => !r.cleaned && r.landedUrl !== null);
+      // landedUrl 이 없어도 목록에서 표식으로 행을 찾을 수 있다(모달 등록).
+      const targets = this.ledger.all().filter((r) => !r.cleaned);
       if (targets.length === 0) {
         this.notRun.DELETE = "삭제할 QA 생성 데이터가 없습니다.";
       }

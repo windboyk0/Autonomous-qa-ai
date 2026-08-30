@@ -137,3 +137,45 @@ describe("라벨 정규화", () => {
     expect(normalizeLabel("  이름 ▼ ")).toBe("이름");
   });
 });
+
+/**
+ * 실측 회귀: SPA 관리자웹에서 등록 화면이 링크가 아니라 버튼 뒤에 있었고,
+ * 그 버튼이 CAUTION 으로 막혀 Create·Update·Delete 가 전부 미실행으로 끝났다.
+ */
+describe("폼을 여는 버튼", () => {
+  it.each(["+ 직원 등록", "+ 수동 등록", "신규 등록", "새 항목 추가", "Create user"])(
+    "%s 는 폼을 열 뿐이므로 SAFE 이고 실행 하한을 넘는다",
+    (label) => {
+      const v = classify(input({ label }), policy);
+      expect(v.risk).toBe("SAFE");
+      expect(v.reason).toContain("폼을 여는 버튼");
+      expect(v.confidence).toBeGreaterThanOrEqual(MIN_CONFIDENCE);
+    },
+  );
+
+  it.each(["저장", "등록하기", "제출", "확인", "적용"])(
+    "%s 는 완료형이라 SAFE로 낮추지 않는다",
+    (label) => {
+      expect(classify(input({ label }), policy).risk).not.toBe("SAFE");
+    },
+  );
+
+  /**
+   * 여는 표식이 없는 라벨은 낮추지 않는다.
+   * form 태그 없이 만든 화면에서는 이런 버튼이 곧 저장 버튼일 수 있다.
+   */
+  it.each(["등록", "추가", "일정등록", "작성"])("%s 는 표식이 없어 CAUTION 그대로", (label) => {
+    expect(classify(input({ label }), policy).risk).toBe("CAUTION");
+  });
+
+  it("폼 안에 있으면 라벨이 무엇이든 낮추지 않는다 — 저장 버튼일 수 있다", () => {
+    expect(classify(input({ label: "등록", inForm: true }), policy).risk).not.toBe("SAFE");
+    expect(classify(input({ label: "+ 추가", inForm: true, type: "submit" }), policy).risk).toBe("CAUTION");
+  });
+
+  it("denylist 와 위험 라벨은 여전히 먼저 이긴다", () => {
+    expect(classify(input({ label: "일괄 등록" }), policy).risk).toBe("DANGEROUS");
+    expect(classify(input({ label: "권한 추가" }), policy).risk).toBe("DANGEROUS");
+    expect(classify(input({ label: "+ 등록", className: "btn-danger" }), policy).risk).toBe("DANGEROUS");
+  });
+});

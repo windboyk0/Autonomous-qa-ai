@@ -35,6 +35,9 @@ const EXPECTED_SCREENS = [
   "설문 수정",
   "2026년 1차 만족도 조사",
   "설문응답통계관리센터",
+  "부서관리",
+  // 주소가 바뀌지 않는 모달 등록 화면. 버튼으로만 닿을 수 있다.
+  "부서관리 > 부서 등록",
   "설정 > 일반",
   "설정 > 알림",
   "설정 > 보안",
@@ -129,8 +132,9 @@ describe("Phase 2 — 탐색 범위", () => {
     expect(new Set(settings.map((s) => s.signals.activeTab))).toEqual(new Set(["일반", "알림", "보안"]));
 
     const withDialog = first.graph.nodes.filter((n) => n.signals.dialogTitle !== null);
-    expect(withDialog.length).toBe(1);
-    expect(withDialog[0]!.signals.dialogTitle).toBe("접속이력");
+    expect(new Set(withDialog.map((d) => d.signals.dialogTitle))).toEqual(
+      new Set(["접속이력", "부서 등록"]),
+    );
   });
 
   /** BUG-10: 보관 필터에서 스피너만 남는 화면. 겉모습이 다르므로 별도 상태여야 한다. */

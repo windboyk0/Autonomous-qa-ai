@@ -276,10 +276,19 @@ export async function runQa(
 
     const executed = explored.actionResults.filter((r) => r.outcome === "EXECUTED").length;
     const skipped = explored.actionResults.length - executed;
+    /*
+     * 미실행 건수만 적으면 그만큼의 기능을 놓친 것처럼 읽힌다.
+     * 실제로는 목록의 행마다 붙은 같은 버튼과, 화면을 다시 열 때마다 다시 세어진 것이
+     * 대부분이다(실측: 511건이 기능 35종). 종 수를 같이 적어야 오해가 없다.
+     */
+    const skippedKinds = new Set(
+      explored.actionResults.filter((r) => r.outcome !== "EXECUTED").map((r) => r.action.label.trim()),
+    ).size;
 
     log(
       "info",
-      `탐색 완료: 화면 ${explored.graph.nodes.length}개 · 액션 실행 ${executed}건 · 미실행 ${skipped}건`,
+      `탐색 완료: 화면 ${explored.graph.nodes.length}개 · 액션 실행 ${executed}건 · ` +
+        `미실행 ${skipped}건 (기능 ${skippedKinds}종, 상세는 리포트 §17)`,
     );
     for (const limit of explored.limits) log("warn", `탐색 제한: ${limit}`);
 

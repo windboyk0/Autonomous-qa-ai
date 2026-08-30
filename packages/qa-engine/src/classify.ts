@@ -39,6 +39,20 @@ const DANGEROUS_WORDS =
 const DANGEROUS_CLASS = /(danger|destructive|delete|remove|warn)/i;
 
 /**
+ * "폼을 여는" 표식과 "쓰기를 끝내는" 라벨.
+ *
+ * 여는 표식은 **명시적인 것만** 인정한다. 맨 "등록"·"추가"는 폼을 여는 버튼일 수도,
+ * form 태그 없이 만든 화면의 저장 버튼일 수도 있어 판정이 갈린다.
+ * 애매하면 위험한 쪽이므로 그런 라벨은 낮추지 않는다.
+ */
+const OPEN_FORM_MARK = /(^\+|신규|새로|^새 | 새 |만들기|생성\s|\bnew\b|\bcreate\b|\badd\b)/i;
+const WRITE_FINISH_LABEL =
+  /(저장|save|제출|submit|확인|완료|적용|반영|등록하기|추가하기|수정하기|보내기)/i;
+
+/** 폼 열기 버튼으로 판정했을 때의 사유 접두사. CRUD 단계가 이 문자열로 되짚는다. */
+export const OPEN_FORM_REASON = "폼을 여는 버튼";
+
+/**
  * GET 링크인데도 상태를 바꿀 것 같은 경로. 링크를 SAFE로 낮출 때의 안전망이다.
  * 정상적인 앱이라면 GET은 아무것도 쓰지 않지만, 그렇지 않은 관리자웹이 흔하다.
  */
@@ -129,6 +143,30 @@ export function classify(input: ClassifyInput, policy: SafetyPolicy): Classifica
       return { risk: "SAFE", reason: `조회 링크: "${label}"`, confidence: 0.95 };
     }
     return { risk: "SAFE", reason: `GET 이동 링크: "${label}"`, confidence: 0.85 };
+  }
+
+  /**
+   * 5-2. 폼을 여는 버튼.
+   *
+   * 규칙 5는 `<a href>` 에만 적용된다. 그런데 SPA 관리자웹에서 등록 화면은
+   * 링크가 아니라 **버튼** 뒤에 있다(모달이거나 라우터 이동이다).
+   * 실측에서 "+ 직원 등록" 이 CAUTION 으로 막혀 등록 화면에 영영 도달하지 못했고,
+   * 그 결과 Create·Update·Delete 가 **전부** 미실행으로 끝났다.
+   *
+   * 저장 버튼과 구분하는 근거는 두 가지다.
+   *   - **폼 밖에 있다.** 저장 버튼은 자기가 저장할 폼 안에 있다.
+   *   - 라벨에 **명시적인 여는 표식**이 있다("+", 신규, 새, new/create/add).
+   *     맨 "등록"·"추가"는 저장 버튼일 수도 있어 낮추지 않는다.
+   *
+   * 그래도 틀릴 수 있으므로 실행 후 쓰기 요청이 관측되면 탐색기가 경고를 남긴다.
+   */
+  if (
+    input.tagName !== "a" &&
+    !input.inForm &&
+    OPEN_FORM_MARK.test(label) &&
+    !WRITE_FINISH_LABEL.test(label)
+  ) {
+    return { risk: "SAFE", reason: `${OPEN_FORM_REASON}: "${label}"`, confidence: 0.75 };
   }
 
   // 6. 쓰기 라벨 (버튼)

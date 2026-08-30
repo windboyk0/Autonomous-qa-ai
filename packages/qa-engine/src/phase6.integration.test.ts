@@ -43,11 +43,26 @@ async function leftoverInFixture(): Promise<string[]> {
     redirect: "manual",
   });
   const cookie = login.headers.get("set-cookie")?.split(";")[0] ?? "";
-  const res = await fetch(`${fixture.url}/api/surveys`, { headers: { cookie } });
-  const rows = (await res.json()) as Array<{ title: string; owner: string }>;
-  return rows
-    .filter((r) => r.title.includes(AUTO_QA_PREFIX) || r.owner.includes(AUTO_QA_PREFIX))
-    .map((r) => r.title);
+  const left: string[] = [];
+
+  const surveys = (await (await fetch(`${fixture.url}/api/surveys`, { headers: { cookie } })).json()) as Array<{
+    title: string;
+    owner: string;
+  }>;
+  for (const r of surveys) {
+    if (r.title.includes(AUTO_QA_PREFIX) || r.owner.includes(AUTO_QA_PREFIX)) left.push(r.title);
+  }
+
+  // 모달로 만든 부서도 같이 본다. 화면 종류가 달라도 잔여 데이터는 0이어야 한다.
+  const depts = (await (await fetch(`${fixture.url}/api/depts`, { headers: { cookie } })).json()) as Array<{
+    name: string;
+    owner: string;
+  }>;
+  for (const r of depts) {
+    if (r.name.includes(AUTO_QA_PREFIX) || r.owner.includes(AUTO_QA_PREFIX)) left.push(r.name);
+  }
+
+  return left;
 }
 
 beforeAll(async () => {
@@ -124,6 +139,16 @@ describe("Phase 6 — Update / Delete", () => {
   it("QA가 만든 데이터를 삭제한다", () => {
     expect(crudOf("DELETE").pass).toBeGreaterThan(0);
     expect(crudOf("DELETE").fail).toBe(0);
+  });
+
+  /**
+   * 실측 회귀. SPA 관리자웹은 등록 화면이 `/new` 주소가 아니라 버튼 뒤의 모달이었고,
+   * 그 버튼이 CAUTION 으로 막혀 "등록 화면을 찾지 못했습니다" 로 Create·Update·Delete 가
+   * 전부 미실행으로 끝났다. 주소가 아니라 버튼으로도 등록 화면에 닿아야 한다.
+   */
+  it("주소에 /new 가 없는 모달 등록 화면에도 닿는다", () => {
+    const modal = ledger.filter((r) => new URL(r.createUrl).pathname === "/depts");
+    expect(modal.length, "모달로 등록한 데이터가 없다").toBeGreaterThan(0);
   });
 
   it("Read는 탐색한 화면 수만큼 집계된다", () => {

@@ -9,6 +9,7 @@ export const NAV = [
   { href: "/surveys", label: "설문관리" },
   // BUG-09: 라벨이 사이드바 고정폭(160px)을 넘어 잘린다.
   { href: "/stats", label: "설문응답통계관리센터" },
+  { href: "/depts", label: "부서관리" },
   { href: "/settings", label: "설정" },
 ];
 

@@ -51,6 +51,25 @@ export const surveys: Survey[] = Array.from({ length: 23 }, (_, i) => {
   };
 });
 
+/**
+ * 부서. **모달로 등록하는 SPA 화면**을 흉내내기 위한 데이터다.
+ * 실측 관리자웹은 등록 화면이 `/new` 주소가 아니라 버튼 뒤의 모달이었고,
+ * 그 탓에 Create·Update·Delete 가 전부 미실행으로 끝났다.
+ */
+export interface Dept {
+  id: number;
+  name: string;
+  owner: string;
+}
+
+export const depts: Dept[] = Array.from({ length: 5 }, (_, i) => ({
+  id: i + 1,
+  name: DEPTS[i]!,
+  owner: `테스트사용자${i + 1}`,
+}));
+
+export const createdDepts: Dept[] = [];
+
 /** 런타임에 추가되는 데이터. QA가 만든 AUTO-QA-* 데이터가 여기 쌓인다. */
 export const createdSurveys: Survey[] = [];
 export const createdUsers: User[] = [];
@@ -58,6 +77,7 @@ export const createdUsers: User[] = [];
 export function resetRuntimeData(): void {
   createdSurveys.length = 0;
   createdUsers.length = 0;
+  createdDepts.length = 0;
 }
 
 export const CREDENTIALS = { id: "admin", pw: "admin123!" };

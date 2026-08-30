@@ -274,6 +274,92 @@ export function surveyEditPage(s: Survey): string {
 }
 
 // ─────────────────────────────────────────────────────────────── 설문 등록 (BUG-05)
+/**
+ * 부서관리 — **모달로 등록하는 SPA 화면**.
+ *
+ * 다른 화면과 달리 등록 진입점이 `<a href>` 가 아니라 `<button>` 이고,
+ * 눌러도 주소가 바뀌지 않는다. 실제 관리자웹의 흔한 모양이며,
+ * 이 화면이 없으면 "등록 화면을 찾지 못했습니다" 회귀를 잡을 수 없다.
+ */
+export function deptsPage(rows: Array<{ id: number; name: string; owner: string }>): string {
+  const body = `
+      <h1>부서관리</h1>
+      <div class="card">
+        <div class="toolbar">
+          <button type="button" class="primary" id="openNew" data-testid="dept-new">+ 새 부서</button>
+        </div>
+        <table data-testid="dept-table">
+          <thead><tr><th>ID</th><th>부서명</th><th>부서장</th><th>관리</th></tr></thead>
+          <tbody>
+            ${rows
+              .map(
+                (d) => `<tr data-testid="dept-row-${d.id}"><td>${d.id}</td><td>${d.name}</td><td>${d.owner}</td>
+              <td><button type="button" class="btn" data-dept="${d.id}" data-act="edit">수정</button>
+                  <button type="button" class="btn danger" data-dept="${d.id}" data-act="del">삭제</button></td></tr>`,
+              )
+              .join("")}
+          </tbody>
+        </table>
+      </div>
+
+      <dialog id="deptDialog" data-testid="dept-dialog">
+        <h2 id="deptDialogTitle">부서 등록</h2>
+        <form id="deptForm">
+          <input type="hidden" id="deptId">
+          <div class="field"><label for="deptName">부서명 *</label><input id="deptName" name="name" type="text" data-testid="dept-name"></div>
+          <div class="field"><label for="deptOwner">부서장 *</label><input id="deptOwner" name="owner" type="text" data-testid="dept-owner"></div>
+          <div class="toolbar">
+            <button type="button" class="primary" id="deptSave" data-testid="dept-save">저장</button>
+            <button type="button" class="btn" id="deptCancel">닫기</button>
+          </div>
+        </form>
+      </dialog>`;
+
+  const script = `
+    var dlg = document.getElementById('deptDialog');
+    document.getElementById('openNew').addEventListener('click', function () {
+      document.getElementById('deptId').value = '';
+      document.getElementById('deptName').value = '';
+      document.getElementById('deptOwner').value = '';
+      document.getElementById('deptDialogTitle').textContent = '부서 등록';
+      dlg.showModal();
+    });
+    document.getElementById('deptCancel').addEventListener('click', function () { dlg.close(); });
+    document.querySelectorAll('[data-act="edit"]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        var tr = b.closest('tr');
+        document.getElementById('deptId').value = b.getAttribute('data-dept');
+        document.getElementById('deptName').value = tr.children[1].textContent;
+        document.getElementById('deptOwner').value = tr.children[2].textContent;
+        document.getElementById('deptDialogTitle').textContent = '부서 수정';
+        dlg.showModal();
+      });
+    });
+    document.querySelectorAll('[data-act="del"]').forEach(function (b) {
+      b.addEventListener('click', function () {
+        fetch('/api/depts/' + b.getAttribute('data-dept'), { method: 'DELETE' })
+          .then(function () { location.reload(); });
+      });
+    });
+    document.getElementById('deptSave').addEventListener('click', function () {
+      var id = document.getElementById('deptId').value;
+      var name = document.getElementById('deptName').value;
+      if (!name) { window.showToast('부서명을 입력하세요.'); return; }
+      var owner = document.getElementById('deptOwner').value;
+      if (!owner) { window.showToast('부서장을 입력하세요.'); return; }
+      fetch('/api/depts' + (id ? '/' + id : ''), {
+        method: id ? 'PUT' : 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name, owner: owner })
+      }).then(function () {
+        window.showToast('저장되었습니다.');
+        setTimeout(function () { location.reload(); }, 300);
+      });
+    });
+  `;
+  return shell({ title: "부서관리", activeHref: "/depts", body, script });
+}
+
 export function surveyNewPage(): string {
   const body = `
       <h1>설문 등록</h1>

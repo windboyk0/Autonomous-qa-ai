@@ -5,6 +5,8 @@ import {
   surveys,
   createdSurveys,
   createdUsers,
+  depts,
+  createdDepts,
   resetRuntimeData,
   CREDENTIALS,
   type Survey,
@@ -19,6 +21,7 @@ import {
   surveyDetailPage,
   surveyEditPage,
   surveyNewPage,
+  deptsPage,
   statsPage,
   settingsPage,
   notFoundPage,
@@ -117,6 +120,51 @@ export function createFixtureServer(port = DEFAULT_PORT): http.Server {
     return json(res, { message: "export job failed: report template missing" }, 500);
   }
 
+  /**
+   * 부서 API. **QA가 만든 부서(1000번대)만** 수정·삭제할 수 있다.
+   * 시드 부서를 건드리려 하면 404로 막아, 소유권 판정이 뚫리면 테스트가 깨지게 한다.
+   */
+  if (path === "/api/depts" && method === "GET") {
+    return json(res, [...depts, ...createdDepts]);
+  }
+
+  if (path === "/api/depts" && method === "POST") {
+    const body = await readBody(req);
+    let payload: { name?: string; owner?: string } = {};
+    try {
+      payload = JSON.parse(body);
+    } catch {
+      return json(res, { message: "invalid json" }, 400);
+    }
+    const created = {
+      id: 1000 + createdDepts.length + 1,
+      name: payload.name ?? "",
+      owner: payload.owner ?? "",
+    };
+    createdDepts.push(created);
+    return json(res, created, 201);
+  }
+
+  const deptApiMatch = /^\/api\/depts\/(\d+)$/.exec(path);
+  if (deptApiMatch && (method === "PUT" || method === "DELETE")) {
+    const id = Number(deptApiMatch[1]);
+    const at = createdDepts.findIndex((d) => d.id === id);
+    if (at < 0) return json(res, { message: "seed dept is read-only" }, 404);
+    if (method === "DELETE") {
+      createdDepts.splice(at, 1);
+      return json(res, { ok: true });
+    }
+    const body = await readBody(req);
+    let payload: { name?: string; owner?: string } = {};
+    try {
+      payload = JSON.parse(body);
+    } catch {
+      return json(res, { message: "invalid json" }, 400);
+    }
+    createdDepts[at] = { id, name: payload.name ?? "", owner: payload.owner ?? "" };
+    return json(res, createdDepts[at]);
+  }
+
   if (path === "/api/surveys" && method === "POST") {
     const raw = await readBody(req);
     let payload: { title?: string; owner?: string; contact?: string; memo?: string } = {};
@@ -208,6 +256,8 @@ export function createFixtureServer(port = DEFAULT_PORT): http.Server {
     const s = [...surveys, ...createdSurveys].find((x) => x.id === id);
     return s ? html(res, surveyDetailPage(s)) : html(res, notFoundPage(), 404);
   }
+
+  if (path === "/depts") return html(res, deptsPage([...depts, ...createdDepts]));
 
   if (path === "/stats") return html(res, statsPage());
   if (path === "/settings") return html(res, settingsPage(url.searchParams.get("tab") ?? "general"));
