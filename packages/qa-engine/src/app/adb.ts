@@ -21,9 +21,21 @@ const MAX_BUFFER = 32 * 1024 * 1024;
 function knownLocations(): string[] {
   const home = homedir();
   const local = process.env.LOCALAPPDATA ?? join(home, "AppData", "Local");
+  /*
+   * 엔진 번들 옆의 동봉본.
+   *
+   * 설치본 구조는 `resources/engine/cli.js` 와 `resources/platform-tools/adb.exe` 다.
+   * 원래는 `QA_RESOURCES_DIR` 이 오기만 기다렸는데, 그 환경변수 없이 엔진을 직접
+   * 부르면 **동봉해 놓고도 못 찾는다**(실측). 그러면서 "설치본에는 adb 가 동봉되어
+   * 있습니다"라고 안내해 사용자를 더 헷갈리게 한다.
+   * 자기 위치에서 찾을 수 있는 것은 환경에 묻지 않는다.
+   */
+  const beside = process.argv[1] ? join(dirname(process.argv[1]), "..", "platform-tools", "adb.exe") : "";
+
   return [
     // 설치본에 동봉한 것. 가장 먼저 본다 — 사용자가 아무것도 안 해도 되어야 한다.
     join(process.env.QA_RESOURCES_DIR ?? "", "platform-tools", "adb.exe"),
+    beside,
     join(local, "Android", "Sdk", "platform-tools", "adb.exe"),
     join(home, "AppData", "Local", "Android", "Sdk", "platform-tools", "adb.exe"),
     "C:\\platform-tools\\adb.exe",

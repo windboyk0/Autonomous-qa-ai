@@ -299,6 +299,133 @@ function computeChangeImpact(config: RunConfig): ChangeImpact | null {
 }
 
 /**
+ * 앱 전용 Run.
+ *
+ * 브라우저를 띄우지 않는다. 대상이 폰이므로 Chromium 이 있든 없든 상관없다.
+ *
+ * 앱 탐색 결과를 **웹과 같은 파이프라인**에 얹는다. 화면은 그래프 노드로,
+ * 조작은 ActionResult 로 옮겨 담는다. 그래야 judge·리포트·Monitor 가
+ * 모드를 몰라도 되고, 사용자도 리포트 읽는 법을 한 번만 배우면 된다.
+ */
+async function runAppOnly(
+  config: RunConfig,
+  ctx: RunContext,
+  startedAt: Date,
+  options: RunOptions,
+): Promise<RunOutcome> {
+  const { preflightApp } = await import("./app/preflight.js");
+  const { Adb } = await import("./app/adb.js");
+  const { AdbDriver } = await import("./app/driver.js");
+  const { AppExplorer } = await import("./app/explorer.js");
+  const { detectAppIssues, appUnverifiedAreas } = await import("./app/detect-app.js");
+
+  /*
+   * 기기부터 확인한다. 없는 기기로 15분짜리 탐색을 시작해 놓고 끝에 가서
+   * 실패를 알리면 안 된다.
+   */
+  const pre = preflightApp({
+    adbPath: config.app.adbPath,
+    deviceSerial: config.app.deviceSerial,
+    packageName: config.app.packageName,
+  });
+  if (!pre.ok) {
+    const reason = pre.remediation ? `${pre.detail} ${pre.remediation}` : pre.detail;
+    log("error", reason);
+    return { status: "FAILED", message: pre.detail };
+  }
+
+  const aiReady = await preflightAi(config, options.createProvider ?? createProvider);
+
+  const adb = new Adb(pre.adbPath!, pre.device!.serial);
+  // 이전 실행의 로그가 이번 결함으로 잡히지 않게 비운다.
+  adb.clearLogcat();
+
+  const driver = new AdbDriver(adb, config.app.packageName, config.app.settleMs);
+  const appResult = new AppExplorer(driver, ctx, config, options.control).explore();
+
+  /*
+   * 앱 화면에는 URL 도 DOM 도 없다. 없는 신호를 지어내지 않고 빈 값으로 둔다 —
+   * 리포트에 그럴듯한 가짜 경로가 찍히면 사용자가 그것을 찾아 헤맨다.
+   */
+  const explored: ExploreResult = {
+    graph: {
+      nodes: appResult.screens.map((s) => ({
+        stateKey: s.stateKey,
+        signals: {
+          pathTemplate: "",
+          queryKeys: [],
+          title: s.screenName,
+          heading: s.screenName,
+          activeTab: null,
+          dialogTitle: null,
+          navLabels: [],
+          structureHash: s.stateKey,
+        },
+        url: "",
+        depth: s.depth,
+        arrivedByActionId: null,
+        visitedAt: new Date().toISOString(),
+        screenName: s.screenName,
+      })),
+      edges: [],
+    },
+    actionResults: [],
+    candidates: detectAppIssues(appResult, ctx),
+    limits: [...appResult.limits, ...appUnverifiedAreas(appResult)],
+  };
+
+  const judged = judge(explored.candidates, explored.graph);
+  log("info", `Issue 확정: 후보 ${judged.mergedFrom}건 → Issue ${judged.issues.length}건`);
+
+  const enriched = await enrichWithAi({
+    config,
+    issues: judged.issues,
+    explored,
+    evidences: ctx.listEvidences(),
+    makeProvider: options.createProvider ?? createProvider,
+    ready: aiReady,
+  });
+
+  for (const issue of enriched.issues) {
+    emit({ type: "issue:found", at: new Date().toISOString(), issue });
+  }
+
+  const summary = buildSummary({
+    runId: ctx.runId,
+    config,
+    startedAt,
+    explored,
+    issues: enriched.issues,
+    ai: enriched,
+    stopped: options.control?.stopped ?? false,
+  });
+
+  /*
+   * 실행/미실행 수는 앱 탐색의 실제 숫자로 덮는다.
+   * ActionResult 로 옮겨 담지 않았으므로 그냥 두면 0 으로 나가고,
+   * 사용자는 아무것도 안 눌린 줄 안다.
+   */
+  summary.actionsExecuted = appResult.actions.filter((a) => a.outcome === "EXECUTED").length;
+  summary.actionsSkipped = appResult.actions.length - summary.actionsExecuted;
+
+  const reportPath = ctx.writeReport(
+    renderReport({
+      summary,
+      issues: enriched.issues,
+      evidences: ctx.listEvidences(),
+      aiSummary: enriched.summaryText,
+    }),
+  );
+  const issuesPath = ctx.writeIssues({ schemaVersion: 1, summary, issues: enriched.issues });
+
+  emit({ type: "run:finished", at: new Date().toISOString(), summary, reportPath, issuesPath });
+  return {
+    status: summary.status,
+    message: `화면 ${appResult.screens.length}개 · 결함 ${enriched.issues.length}건`,
+  };
+}
+
+/**
  * 소스 전용 Run.
  *
  * 탐색 그래프가 없으므로 빈 결과를 만들어 넘긴다. 리포트 목차는 하나뿐이고,
@@ -378,6 +505,11 @@ export async function runQa(
    */
   if (config.mode === "source") {
     return await runSourceOnly(config, ctx, startedAt, options);
+  }
+
+  // 앱 QA 도 마찬가지다. 대상이 폰이므로 브라우저를 확인할 이유가 없다.
+  if (config.mode === "app") {
+    return await runAppOnly(config, ctx, startedAt, options);
   }
 
   const pre = await preflightBrowser();
