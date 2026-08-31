@@ -174,6 +174,27 @@ export const AppConfig = z.object({
    * 출근하기·퇴근하기는 실제 근태 기록을 남긴다. 기본은 하지 않는다.
    */
   tryRiskyLast: z.boolean().default(false),
+  /**
+   * 이 말이 들어간 버튼은 되돌릴 수 없는 것으로 본다.
+   *
+   * 도구는 남의 앱에서 무엇이 위험한지 알 수 없다. "출근하기"는 라벨만 보면
+   * 평범한 동작이지만 실제로는 근태 기록을 남긴다(실측).
+   * 그래서 흔한 것을 기본으로 두고 **사용자가 자기 앱에 맞게 더할 수 있게** 한다.
+   */
+  riskyLabels: z
+    .array(z.string())
+    .default([
+      "출근",
+      "퇴근",
+      "체크인",
+      "체크아웃",
+      "결제",
+      "구매",
+      "주문",
+      "해지",
+      "신고",
+      "제출",
+    ]),
 });
 export type AppConfig = z.infer<typeof AppConfig>;
 

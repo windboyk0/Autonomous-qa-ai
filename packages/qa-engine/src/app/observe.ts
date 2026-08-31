@@ -84,27 +84,64 @@ function nameOf(elements: AppElement[], texts: string[], stateKey: string): stri
   return firstLabel?.trim() || `화면-${stateKey.slice(0, 8)}`;
 }
 
-/**
- * 구조 지문.
- *
- * **구조는 넣고 데이터는 뺀다** (CLAUDE.md §27-2). 목록에 항목이 몇 개든,
- * 오늘 날짜가 무엇이든 같은 화면이어야 한다. 그래서 텍스트 값은 넣지 않고
- * 클래스·resource-id·클릭 가능 여부만 넣는다.
- *
- * 형제 중 결과가 같은 것은 접는다 — 목록 10행과 3행이 다른 화면이 되면
- * 데이터가 바뀔 때마다 탐색이 끝나지 않는다.
- */
-function structureHash(elements: AppElement[], allNodes: string[]): string {
-  const shape = allNodes
-    .map((n) => {
-      const cls = attr(n, "class").split(".").pop() ?? "";
-      const id = attr(n, "resource-id").split("/").pop() ?? "";
-      const click = attr(n, "clickable") === "true" ? "c" : "";
-      return `${cls}#${id}${click}`;
-    })
-    .filter((s) => s !== "#");
+/** 목록으로 볼 최소 형제 수. 이만큼 반복되면 데이터로 본다. */
+const LIST_GROUP_MIN = 3;
 
-  return sha1([...new Set(shape)].sort().join("|") + `|n=${elements.length > 0 ? "y" : "n"}`);
+/** 숫자는 데이터다. `2026-08-31` 과 `2026-09-01` 은 같은 화면이어야 한다. */
+function maskDigits(text: string): string {
+  return text.replace(/\d+/g, "#");
+}
+
+/**
+ * 화면 지문.
+ *
+ * **구조는 넣고 데이터는 뺀다** (CLAUDE.md §27-2). 그런데 앱에서는 그 경계가
+ * 웹과 다르다.
+ *
+ * 처음에는 클래스·resource-id 만 넣고 라벨을 전부 뺐다. 그랬더니 **모든 화면이
+ * 같은 지문**이 됐다 — Flutter 덤프는 대부분 `android.view.View` 에
+ * resource-id 도 없어서, 남는 것이 없었다(실측: 4개 화면이 1개로 보였다).
+ *
+ * 그래서 웹이 `heading` 과 `navLabels` 를 지문에 넣는 것과 같은 이유로
+ * **제목과 클릭 요소의 라벨을 넣는다.** 다만 목록처럼 반복되는 형제는 접는다 —
+ * 사용자 47명이 47개 화면이 되면 탐색이 끝나지 않는다.
+ */
+function fingerprint(title: string, elements: AppElement[], allNodes: string[]): string {
+  // 1. 화면 뼈대. 반복되는 것은 한 번만 센다.
+  const skeleton = [
+    ...new Set(
+      allNodes
+        .map((n) => {
+          const cls = attr(n, "class").split(".").pop() ?? "";
+          const id = attr(n, "resource-id").split("/").pop() ?? "";
+          return `${cls}#${id}`;
+        })
+        .filter((x) => x !== "#"),
+    ),
+  ].sort();
+
+  /*
+   * 2. 클릭 요소. 같은 모양이 여러 번 나오면 **목록**으로 보고 라벨을 버린다.
+   *    폭까지 같아야 같은 모양으로 본다 — 나란한 버튼과 목록 행을 구별하기 위해서다.
+   */
+  const groupKey = (e: AppElement) =>
+    `${e.className.split(".").pop() ?? ""}#${e.resourceId?.split("/").pop() ?? ""}@${e.bounds[2] - e.bounds[0]}`;
+
+  const counts = new Map<string, number>();
+  for (const e of elements) counts.set(groupKey(e), (counts.get(groupKey(e)) ?? 0) + 1);
+
+  const clickShape = [
+    ...new Set(
+      elements.map((e) => {
+        const key = groupKey(e);
+        return (counts.get(key) ?? 0) >= LIST_GROUP_MIN
+          ? `${key}×목록`
+          : `${key}:${maskDigits(e.label)}`;
+      }),
+    ),
+  ].sort();
+
+  return sha1([maskDigits(title), skeleton.join("|"), clickShape.join("|")].join("||"));
 }
 
 /**
@@ -160,7 +197,8 @@ export function readScreen(xml: string): AppScreen | null {
     });
   }
 
-  const stateKey = structureHash(elements, nodes);
+  const title = texts.find((t) => t.trim().length >= 2 && t.trim().length <= 30)?.trim() ?? "";
+  const stateKey = fingerprint(title, elements, nodes);
   return {
     stateKey,
     screenName: nameOf(elements, texts, stateKey),

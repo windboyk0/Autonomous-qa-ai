@@ -70,10 +70,14 @@ describe("Phase 13 — 화면 관찰", () => {
 
 describe("Phase 13 — 화면 지문", () => {
   /** 목록 항목이 몇 개든, 오늘 날짜가 무엇이든 같은 화면이어야 한다. */
-  it("텍스트 값이 달라도 같은 화면이다", () => {
-    const withOtherText = DUMP.replace("출근부", "출근부(수정)").replace(
+  /**
+   * 제목은 지문에 들어간다 — 웹이 heading 을 넣는 것과 같다.
+   * 여기서 말하는 "데이터"는 본문 텍스트와 목록 내용이다.
+   */
+  it("본문 텍스트가 달라도 같은 화면이다", () => {
+    const withOtherText = DUMP.replace(
       "TimeoutException after 0:00:15.000000: Future not completed",
-      "정상",
+      "위치를 확인했습니다",
     );
     expect(readScreen(withOtherText)!.stateKey).toBe(readScreen(DUMP)!.stateKey);
   });
