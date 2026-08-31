@@ -43,8 +43,20 @@ function git(rootDir: string, args: string[]): string {
 export function gitChangedFiles(rootDir: string, base = ""): ChangedFiles {
   try {
     git(rootDir, ["rev-parse", "--is-inside-work-tree"]);
-  } catch {
-    return { files: [], comparedWith: "", error: "Git 저장소가 아닙니다." };
+  } catch (err) {
+    /*
+     * git 이 **깔려 있지 않은 것**과 폴더가 저장소가 **아닌 것**은 다른 문제고
+     * 해결책도 다르다. 둘 다 "저장소가 아닙니다"라고 하면 사용자는 git 이 없는
+     * PC 에서 `git init` 을 하게 된다.
+     */
+    const missing = (err as NodeJS.ErrnoException)?.code === "ENOENT";
+    return {
+      files: [],
+      comparedWith: "",
+      error: missing
+        ? "이 PC 에 git 이 없습니다. git 을 설치하면 변경 범위를 비교할 수 있습니다."
+        : "Git 저장소가 아닙니다.",
+    };
   }
 
   const norm = (out: string): string[] =>

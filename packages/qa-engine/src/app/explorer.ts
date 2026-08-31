@@ -343,10 +343,19 @@ export class AppExplorer {
     const root = this.look(0);
 
     if (!root) {
+      /*
+       * 원인이 둘이고 안내가 완전히 다르다.
+       * 기기가 끊긴 것을 "앱이 접근성 정보를 노출하지 않는다"고 하면
+       * 사용자는 멀쩡한 앱을 뜯어보게 된다(실측).
+       */
+      const gone = !this.driver.isReachable();
       this.limits.push(
-        "화면을 읽지 못했습니다. 앱이 접근성 정보를 노출하지 않으면 요소를 찾을 수 없습니다.",
+        gone
+          ? "기기 연결이 끊겼습니다. 무선 디버깅은 화면이 꺼지면 끊어집니다 — " +
+            "다시 연결한 뒤 시도하세요."
+          : "화면을 읽지 못했습니다. 앱이 접근성 정보를 노출하지 않으면 요소를 찾을 수 없습니다.",
       );
-      log("warn", "UI 덤프를 읽지 못했습니다. 탐색할 요소가 없습니다.");
+      log("warn", gone ? "기기 연결이 끊겼습니다." : "UI 덤프를 읽지 못했습니다.");
       return { screens: this.screens, actions: this.actions, limits: this.limits, steps: this.steps };
     }
 

@@ -69,6 +69,16 @@ export function classifyAppElement(
     };
   }
 
+  /*
+   * 웹의 "폼을 여는 버튼" 규칙은 앱에 그대로 옮겨오면 안 된다.
+   * 앱에는 폼 밖·안이라는 구분이 없어서, "위치 새로고침" 같은 것이
+   * 폼 여는 버튼으로 판정된다(실측). 결론(SAFE)은 같지만 사유가 틀리면
+   * 리포트를 읽는 사람이 도구를 못 믿게 된다.
+   */
+  if (base.reason.startsWith("폼을 여는 버튼")) {
+    return { ...base, reason: `이동으로 봄: "${element.label}"` };
+  }
+
   // 나머지는 웹 판정을 그대로 따른다.
   if (base.risk !== "CAUTION" || !base.reason.startsWith("분류 불가")) return base;
 

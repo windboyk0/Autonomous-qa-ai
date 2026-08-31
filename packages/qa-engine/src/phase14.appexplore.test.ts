@@ -118,6 +118,13 @@ class FakeDriver implements AppDriver {
   settle(): void {
     /* 가짜 기기는 즉시 안정된다 */
   }
+
+  /** 무선 디버깅이 끊긴 상황을 흉내내려고 테스트에서 false 로 바꾼다. */
+  reachable = true;
+
+  isReachable(): boolean {
+    return this.reachable;
+  }
 }
 
 let outDir: string;
@@ -295,6 +302,22 @@ describe("Phase 14 — 읽지 못했을 때", () => {
     const driver = new FakeDriver({ screens: {}, edges: {} });
     const result = new AppExplorer(driver, ctx, config()).explore();
     expect(result.limits.join("\n")).toContain("접근성 정보");
+  });
+
+  /*
+   * 실측: 무선 디버깅이 탐색 도중 끊겼는데 "앱이 접근성 정보를 노출하지
+   * 않는다"고 안내했다. 사용자는 멀쩡한 앱을 뜯어보게 된다.
+   * 원인이 다르면 안내도 달라야 한다.
+   */
+  it("기기가 끊긴 것과 요소가 없는 것을 구분해 안내한다", () => {
+    const driver = new FakeDriver({ screens: {}, edges: {} });
+    driver.reachable = false;
+
+    const result = new AppExplorer(driver, ctx, config()).explore();
+
+    const limits = result.limits.join("\n");
+    expect(limits).toContain("기기 연결이 끊겼습니다");
+    expect(limits).not.toContain("접근성 정보");
   });
 });
 

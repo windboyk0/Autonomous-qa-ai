@@ -65,10 +65,29 @@ function parseBounds(raw: string | undefined): AppElement["bounds"] | null {
   return [Number(m[1]), Number(m[2]), Number(m[3]), Number(m[4])];
 }
 
+/**
+ * XML 엔티티를 되돌린다.
+ *
+ * uiautomator 는 줄바꿈을 `&#10;` 으로 적어 보낸다. 그대로 두면 라벨이
+ * `홈&#10;탭 4개 중 1번째` 처럼 나와 리포트에도 그 모양으로 실린다(실측).
+ * 사람이 읽을 것이므로 사람이 읽는 모양으로 되돌린다.
+ */
+function unescapeXml(text: string): string {
+  return text
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCodePoint(parseInt(code, 16)))
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    // amp 는 마지막에 푼다. 먼저 풀면 &amp;lt; 가 < 로 잘못 바뀐다.
+    .replace(/&amp;/g, "&");
+}
+
 /** XML 속성을 뽑는다. 파서를 들이지 않고 정규식으로 읽는다 — 구조가 단순하고 고정적이다. */
 function attr(node: string, name: string): string {
   const m = new RegExp(`\\b${name}="([^"]*)"`).exec(node);
-  return m ? m[1]! : "";
+  return m ? unescapeXml(m[1]!) : "";
 }
 
 /**
@@ -77,9 +96,23 @@ function attr(node: string, name: string): string {
  * 앱바 제목이 가장 좋은 후보다. 없으면 화면 위쪽의 첫 텍스트를 쓴다.
  * 그것도 없으면 지문 앞자리를 쓴다 — 이름이 없다고 화면을 못 세면 안 된다.
  */
-function nameOf(elements: AppElement[], texts: string[], stateKey: string): string {
-  const top = texts.find((t) => t.trim().length >= 2 && t.trim().length <= 30);
-  if (top) return top.trim();
+/**
+ * 화면 이름.
+ *
+ * **문서 순서가 아니라 화면 위쪽에 있는 텍스트**를 고른다.
+ * 처음에는 덤프에 먼저 나오는 것을 썼는데, 서랍 메뉴가 트리 앞쪽에 있어서
+ * 화면 8개가 전부 "메뉴"로 나왔다(실측). 사람은 앱바 제목으로 화면을 부른다.
+ */
+function nameOf(
+  elements: AppElement[],
+  texts: Array<{ text: string; y: number }>,
+  stateKey: string,
+): string {
+  const candidates = texts
+    .filter((t) => t.text.trim().length >= 2 && t.text.trim().length <= 30)
+    .sort((a, b) => a.y - b.y);
+
+  if (candidates.length > 0) return candidates[0]!.text.trim();
   const firstLabel = elements.find((e) => e.label.trim() !== "")?.label;
   return firstLabel?.trim() || `화면-${stateKey.slice(0, 8)}`;
 }
@@ -155,7 +188,7 @@ export function readScreen(xml: string): AppScreen | null {
 
   const nodes = xml.match(/<node\b[^>]*>/g) ?? [];
   const elements: AppElement[] = [];
-  const texts: string[] = [];
+  const texts: Array<{ text: string; y: number }> = [];
   const screenErrors: string[] = [];
   let scrollable = false;
 
@@ -163,7 +196,9 @@ export function readScreen(xml: string): AppScreen | null {
     const desc = attr(node, "content-desc");
     const text = attr(node, "text");
     const label = desc || text;
-    if (text.trim() !== "") texts.push(text);
+    if (text.trim() !== "") {
+      texts.push({ text, y: parseBounds(attr(node, "bounds"))?.[1] ?? Number.MAX_SAFE_INTEGER });
+    }
 
     const combined = `${desc} ${text}`;
     for (const pattern of SCREEN_ERROR_PATTERNS) {
@@ -185,7 +220,8 @@ export function readScreen(xml: string): AppScreen | null {
     if (!clickable || label.trim() === "") continue;
 
     elements.push({
-      label: label.trim(),
+      // 줄바꿈이 든 라벨(탭 설명 등)은 한 줄로 모은다. 표와 로그가 깨진다.
+      label: label.replace(/\s+/g, " ").trim(),
       className: attr(node, "class"),
       resourceId: attr(node, "resource-id") || null,
       x: Math.floor((x1 + x2) / 2),
@@ -197,11 +233,11 @@ export function readScreen(xml: string): AppScreen | null {
     });
   }
 
-  const title = texts.find((t) => t.trim().length >= 2 && t.trim().length <= 30)?.trim() ?? "";
+  const title = nameOf(elements, texts, "");
   const stateKey = fingerprint(title, elements, nodes);
   return {
     stateKey,
-    screenName: nameOf(elements, texts, stateKey),
+    screenName: title,
     elements,
     screenErrors: [...new Set(screenErrors)],
     scrollable,

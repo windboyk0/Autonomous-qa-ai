@@ -27,6 +27,8 @@ export interface AppDriver {
   screenshot(path: string): boolean;
   /** 조작 후 화면이 안정될 때까지 기다린다. */
   settle(): void;
+  /** 기기가 아직 붙어 있는가. 화면을 못 읽었을 때 원인을 가리기 위해 쓴다. */
+  isReachable(): boolean;
 }
 
 /** 실제 기기용 구현. */
@@ -78,5 +80,9 @@ export class AdbDriver implements AppDriver {
 
   settle(): void {
     this.adb.sleep(this.settleMs);
+  }
+
+  isReachable(): boolean {
+    return this.adb.isReachable();
   }
 }
