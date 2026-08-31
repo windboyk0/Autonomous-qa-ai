@@ -90,31 +90,69 @@ function attr(node: string, name: string): string {
   return m ? unescapeXml(m[1]!) : "";
 }
 
+/** 이름으로 쓰면 안 되는 것들. 화면이 아니라 화면을 덮는 장치다. */
+const CHROME_LABEL =
+  /^(스크림|scrim|overlay|backdrop|dim|뒤로|back|navigate up|위로 이동|탐색 열기|open navigation)$/i;
+
+/** 이름 후보 하나. 어디에 얼마만 하게 있는지까지 들고 다닌다. */
+interface LabelBox {
+  text: string;
+  /** 왼쪽 위 y. 앱바 제목을 고르는 기준이다. */
+  y: number;
+  width: number;
+  height: number;
+  clickable: boolean;
+}
+
 /**
  * 화면 이름.
  *
- * 앱바 제목이 가장 좋은 후보다. 없으면 화면 위쪽의 첫 텍스트를 쓴다.
- * 그것도 없으면 지문 앞자리를 쓴다 — 이름이 없다고 화면을 못 세면 안 된다.
- */
-/**
- * 화면 이름.
+ * 사람은 앱바 제목으로 화면을 부른다. 그것을 고른다.
  *
- * **문서 순서가 아니라 화면 위쪽에 있는 텍스트**를 고른다.
- * 처음에는 덤프에 먼저 나오는 것을 썼는데, 서랍 메뉴가 트리 앞쪽에 있어서
- * 화면 8개가 전부 "메뉴"로 나왔다(실측). 사람은 앱바 제목으로 화면을 부른다.
+ * 두 번 틀렸고 두 번 다 실기기에서만 드러났다.
+ *
+ *   1. 처음에는 덤프에 먼저 나오는 라벨을 썼다. 서랍 메뉴가 트리 앞쪽이라
+ *      화면 8개가 전부 "메뉴" 였다.
+ *   2. 다음에는 `text` 속성 중 가장 위엣것을 썼다. **Flutter 앱은 text 를
+ *      거의 쓰지 않는다** — 라벨이 전부 content-desc 로 온다. 그래서 후보가
+ *      0개가 되어 다시 문서 순서로 떨어졌고, 여전히 "메뉴" 였다.
+ *
+ * 그래서 이번에는 text·content-desc 를 **함께** 보고, 생김새로 거른다.
+ *   - 화면을 통째로 덮는 것은 컨테이너나 스크림이지 제목이 아니다.
+ *   - 작고 네모난 것은 아이콘 버튼(햄버거·알림·로그아웃)이지 제목이 아니다.
+ *   - 제목은 보통 **누를 수 없다.** 그래서 못 누르는 것을 먼저 본다.
  */
-function nameOf(
-  elements: AppElement[],
-  texts: Array<{ text: string; y: number }>,
-  stateKey: string,
-): string {
-  const candidates = texts
-    .filter((t) => t.text.trim().length >= 2 && t.text.trim().length <= 30)
-    .sort((a, b) => a.y - b.y);
+function nameOf(labels: LabelBox[], screen: { width: number; height: number }, stateKey: string): string {
+  const isFullScreen = (l: LabelBox) =>
+    screen.width > 0 && l.width >= screen.width * 0.9 && l.height >= screen.height * 0.7;
+
+  // 아이콘 버튼: 화면 폭의 15% 미만이면서 대체로 정사각형.
+  const isIcon = (l: LabelBox) =>
+    screen.width > 0 &&
+    l.width < screen.width * 0.15 &&
+    l.height > 0 &&
+    l.width / l.height > 0.5 &&
+    l.width / l.height < 2;
+
+  const candidates = labels.filter((l) => {
+    const t = l.text.trim();
+    if (t.length < 2 || t.length > 30) return false;
+    if (CHROME_LABEL.test(t)) return false;
+    if (isFullScreen(l)) return false;
+    if (isIcon(l)) return false;
+    return true;
+  });
+
+  candidates.sort((a, b) => {
+    // 제목은 누를 수 없는 쪽이다.
+    if (a.clickable !== b.clickable) return a.clickable ? 1 : -1;
+    if (a.y !== b.y) return a.y - b.y;
+    // 같은 높이면 넓은 쪽이 제목이다. 아이콘보다 글자가 넓다.
+    return b.width - a.width;
+  });
 
   if (candidates.length > 0) return candidates[0]!.text.trim();
-  const firstLabel = elements.find((e) => e.label.trim() !== "")?.label;
-  return firstLabel?.trim() || `화면-${stateKey.slice(0, 8)}`;
+  return `화면-${stateKey.slice(0, 8)}`;
 }
 
 /** 목록으로 볼 최소 형제 수. 이만큼 반복되면 데이터로 본다. */
@@ -188,16 +226,37 @@ export function readScreen(xml: string): AppScreen | null {
 
   const nodes = xml.match(/<node\b[^>]*>/g) ?? [];
   const elements: AppElement[] = [];
-  const texts: Array<{ text: string; y: number }> = [];
+  const labels: LabelBox[] = [];
   const screenErrors: string[] = [];
   let scrollable = false;
+  /*
+   * 화면 크기는 **덤프에서 읽는다.** 가장 큰 노드가 루트다.
+   * 기기에 다시 물으면 왕복이 한 번 더 늘고, 회전 상태가 다를 수도 있다.
+   */
+  const screen = { width: 0, height: 0 };
+  /** 화면을 통째로 덮는 누를 수 있는 것 = 팝업을 닫는 스크림. */
+  let modalOpen = false;
 
   for (const node of nodes) {
     const desc = attr(node, "content-desc");
     const text = attr(node, "text");
     const label = desc || text;
-    if (text.trim() !== "") {
-      texts.push({ text, y: parseBounds(attr(node, "bounds"))?.[1] ?? Number.MAX_SAFE_INTEGER });
+    const box = parseBounds(attr(node, "bounds"));
+    if (box) {
+      const [bx1, by1, bx2, by2] = box;
+      if ((bx2 - bx1) * (by2 - by1) > screen.width * screen.height) {
+        screen.width = bx2 - bx1;
+        screen.height = by2 - by1;
+      }
+      if (label.trim() !== "") {
+        labels.push({
+          text: label.replace(/\s+/g, " ").trim(),
+          y: by1,
+          width: bx2 - bx1,
+          height: by2 - by1,
+          clickable: attr(node, "clickable") === "true",
+        });
+      }
     }
 
     const combined = `${desc} ${text}`;
@@ -233,7 +292,24 @@ export function readScreen(xml: string): AppScreen | null {
     });
   }
 
-  const title = nameOf(elements, texts, "");
+  /*
+   * 팝업이 떠 있으면 이름에 밝힌다.
+   *
+   * 바텀시트가 열린 화면과 안 열린 화면은 제목이 같다. 리포트에 같은 이름이
+   * 두 번 나오면 사용자는 도구가 같은 화면을 두 번 셌다고 생각한다(실측:
+   * 시트가 열린 화면이 "스크림"으로 나왔다 — 이름은 틀렸지만 다른 화면인 것은
+   * 맞았다). 다른 화면이면 다르게 부른다.
+   */
+  for (const l of labels) {
+    if (l.clickable && screen.width > 0 && l.width >= screen.width * 0.9 && l.height >= screen.height * 0.7) {
+      modalOpen = true;
+      break;
+    }
+    if (CHROME_LABEL.test(l.text.trim())) modalOpen = true;
+  }
+
+  const base = nameOf(labels, screen, "");
+  const title = modalOpen ? `${base} (팝업)` : base;
   const stateKey = fingerprint(title, elements, nodes);
   return {
     stateKey,

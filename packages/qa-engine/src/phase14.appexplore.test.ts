@@ -337,3 +337,62 @@ describe("Phase 14 — logcat", () => {
     expect(action?.errors.join("\n")).toContain("FATAL EXCEPTION");
   });
 });
+
+/*
+ * 실기기에서만 드러난 것들이다. 가짜 덤프를 아무리 잘 만들어도
+ * "Flutter 는 text 를 안 쓴다" 같은 것은 상상해서 나오지 않는다.
+ */
+describe("Phase 14 — 화면 이름", () => {
+  /** 실제 근태관리 앱 덤프의 모양. 라벨이 전부 content-desc 로 온다. */
+  const flutterBar = (title: string, extra = "") => `<?xml version="1.0" encoding="UTF-8"?>
+<hierarchy rotation="0">
+  <node class="android.widget.FrameLayout" bounds="[0,0][1080,2340]">
+    <node class="android.view.View" content-desc="메뉴" clickable="true" bounds="[48,150][132,234]"/>
+    <node class="android.view.View" content-desc="${title}" bounds="[200,150][700,230]"/>
+    <node class="android.view.View" content-desc="알림" clickable="true" bounds="[700,150][784,234]"/>
+    <node class="android.view.View" content-desc="로그아웃" clickable="true" bounds="[960,150][1044,234]"/>
+    <node class="android.view.View" content-desc="퇴근하기" clickable="true" bounds="[48,500][1032,640]"/>
+${extra}
+  </node>
+</hierarchy>`;
+
+  it("햄버거 버튼이 아니라 앱바 제목을 쓴다", () => {
+    // 화면 8개가 전부 "메뉴" 로 나왔던 그 상황이다.
+    expect(readScreen(flutterBar("출퇴근 관리"))!.screenName).toBe("출퇴근 관리");
+  });
+
+  it("아이콘 버튼은 이름 후보에서 뺀다", () => {
+    const name = readScreen(flutterBar("근태 내역"))!.screenName;
+    expect(name).not.toBe("알림");
+    expect(name).not.toBe("로그아웃");
+  });
+
+  it("화면을 덮는 스크림을 이름으로 쓰지 않는다", () => {
+    const scrim =
+      '<node class="android.view.View" content-desc="스크림" clickable="true" bounds="[0,0][1080,2340]"/>';
+    const screen = readScreen(flutterBar("근태 내역", scrim))!;
+    expect(screen.screenName).not.toContain("스크림");
+    expect(screen.screenName).toContain("근태 내역");
+  });
+
+  /*
+   * 시트가 열린 화면과 안 열린 화면은 제목이 같다. 리포트에 같은 이름이
+   * 두 번 나오면 사용자는 같은 화면을 두 번 셌다고 본다.
+   */
+  it("팝업이 떠 있으면 이름에 밝히고 다른 화면으로 센다", () => {
+    const scrim =
+      '<node class="android.view.View" content-desc="스크림" clickable="true" bounds="[0,0][1080,2340]"/>';
+    const plain = readScreen(flutterBar("근태 내역"))!;
+    const sheet = readScreen(flutterBar("근태 내역", scrim))!;
+
+    expect(sheet.screenName).toContain("팝업");
+    expect(plain.screenName).not.toContain("팝업");
+    expect(sheet.stateKey).not.toBe(plain.stateKey);
+  });
+
+  it("쓸 이름이 하나도 없으면 지문으로 부른다", () => {
+    const bare = `<?xml version="1.0" encoding="UTF-8"?>
+<hierarchy rotation="0"><node class="android.widget.FrameLayout" bounds="[0,0][1080,2340]"/></hierarchy>`;
+    expect(readScreen(bare)!.screenName).toMatch(/^화면-/);
+  });
+});

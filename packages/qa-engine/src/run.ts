@@ -71,10 +71,19 @@ function unverifiedAreas(results: ActionResult[], config: RunConfig): string[] {
       return `"${label}" — ${v.count}회 발견, 실행하지 않음 (${v.reason}). 화면: ${[...v.screens].join(", ")}`;
     });
 
-  for (const kind of ["create", "update", "delete"] as const) {
-    if (!config.crud[kind]) out.push(`${kind.toUpperCase()} 테스트 — 설정에서 꺼져 있어 실행하지 않았습니다.`);
-    else if (kind === "delete" && !config.crud.deleteConsent)
-      out.push("DELETE 테스트 — 별도 삭제 동의가 없어 실행하지 않았습니다.");
+  /*
+   * CRUD 테스트는 관리자웹에만 있는 개념이다.
+   *
+   * 앱 QA 에서도 이 줄이 나가면 "CREATE 테스트 — 설정에서 꺼져 있어" 라고
+   * 적힌다(실측). 켤 수 있는 설정이 아예 없는데 사용자는 그것을 찾아 헤맨다.
+   * 해당 없는 항목은 "안 한 것"이 아니라 애초에 없는 것이다.
+   */
+  if (config.mode !== "app") {
+    for (const kind of ["create", "update", "delete"] as const) {
+      if (!config.crud[kind]) out.push(`${kind.toUpperCase()} 테스트 — 설정에서 꺼져 있어 실행하지 않았습니다.`);
+      else if (kind === "delete" && !config.crud.deleteConsent)
+        out.push("DELETE 테스트 — 별도 삭제 동의가 없어 실행하지 않았습니다.");
+    }
   }
   if (config.ai.kind === "none") {
     out.push("AI 분석 (원인 추정·화면 평가·기능 누락 후보) — Provider를 사용하지 않았습니다.");
