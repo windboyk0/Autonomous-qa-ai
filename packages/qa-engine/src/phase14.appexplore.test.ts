@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -199,6 +199,25 @@ describe("Phase 14 — 화면을 넓게 훑는다", () => {
     const result = new AppExplorer(driver, ctx, config()).explore();
     expect(result.screens.every((s) => s.screenshotPath !== null)).toBe(true);
     expect(ctx.listEvidences().length).toBeGreaterThanOrEqual(result.screens.length);
+  });
+
+  /*
+   * 스크린샷은 **무엇이 보였는지**만 알려준다. 왜 그 이름으로 불렀는지,
+   * 왜 그 요소를 못 찾았는지는 덤프를 봐야 안다. 실측에서 화면 이름이 틀렸을 때
+   * 기기가 끊긴 뒤로는 아무것도 확인할 수 없었다.
+   */
+  it("화면마다 원본 UI 덤프를 증적으로 남긴다", () => {
+    const driver = new FakeDriver(SIMPLE);
+    const result = new AppExplorer(driver, ctx, config()).explore();
+
+    const dumps = ctx.listEvidences().filter((e) => e.kind === "dom");
+    expect(dumps.length).toBe(result.screens.length);
+
+    for (const d of dumps) {
+      expect(d.path).toMatch(/^dom\/.*\.xml$/);
+      const saved = readFileSync(join(ctx.runDir, d.path!), "utf8");
+      expect(saved).toContain("<hierarchy");
+    }
   });
 });
 

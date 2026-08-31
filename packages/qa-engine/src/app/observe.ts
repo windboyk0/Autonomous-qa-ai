@@ -37,6 +37,15 @@ export interface AppScreen {
   screenErrors: string[];
   /** 스크롤 가능한 화면인가. 숨은 요소를 찾을지 판단한다. */
   scrollable: boolean;
+  /**
+   * 원본 UI 덤프.
+   *
+   * 웹이 DOM 을 증적으로 남기는 것과 같은 자리다. 스크린샷만으로는
+   * **왜 그렇게 판정했는지**를 나중에 알 수 없다. 실측에서 화면 이름이
+   * 틀렸을 때 기기가 붙어 있는 동안에만 원인을 볼 수 있었고, 기기가 끊기자
+   * 아무것도 확인할 수 없었다.
+   */
+  xml: string;
 }
 
 /**
@@ -317,6 +326,7 @@ export function readScreen(xml: string): AppScreen | null {
     elements,
     screenErrors: [...new Set(screenErrors)],
     scrollable,
+    xml,
   };
 }
 

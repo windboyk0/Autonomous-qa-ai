@@ -107,6 +107,27 @@ export class AppExplorer {
         summary: `요소 ${screen.elements.length}개${screen.screenErrors.length > 0 ? ` · 화면 예외 ${screen.screenErrors.length}건` : ""}`,
       });
 
+      /*
+       * 원본 덤프도 남긴다. 웹이 DOM 을 남기는 것과 같은 이유다.
+       *
+       * 스크린샷은 **무엇이 보였는지**만 알려준다. 왜 그 화면을 그 이름으로
+       * 불렀는지, 왜 그 요소를 못 찾았는지는 덤프를 봐야 안다. 기기가 끊기면
+       * 다시 뜰 때까지 아무것도 확인할 수 없다 — 실측에서 두 번 막혔다.
+       */
+      try {
+        const dumpPath = this.ctx.writeText("dom", `${seq}-${_RunContext.slug(screen.screenName)}.xml`, screen.xml);
+        this.ctx.addEvidence({
+          kind: "dom",
+          stateKey: screen.stateKey,
+          screenName: screen.screenName,
+          path: dumpPath,
+          summary: `UI 덤프 ${screen.xml.length.toLocaleString()}자 · 노드 ${(screen.xml.match(/<node\b/g) ?? []).length}개`,
+        });
+      } catch (err) {
+        // 증적을 못 남기는 것으로 탐색을 멈추지는 않는다.
+        log("warn", `UI 덤프 저장 실패 (${screen.screenName}): ${String(err)}`);
+      }
+
       this.screens.push({
         stateKey: screen.stateKey,
         screenName: screen.screenName,
