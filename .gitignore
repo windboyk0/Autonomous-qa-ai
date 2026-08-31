@@ -17,6 +17,9 @@ runs/
 !.env.example
 credentials.json
 
+# 동봉용 adb. 빌드 때 scripts/fetch-adb.mjs 가 받아 온다.
+apps/desktop/vendor/
+
 # Playwright
 test-results/
 playwright-report/

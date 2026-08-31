@@ -21,6 +21,9 @@ extraResources:
     to: engine
   - from: resources/browsers
     to: browsers
+  # 앱 QA 용 adb. 엔진이 자식 프로세스로 실행하므로 asar 밖이어야 한다.
+  - from: resources/platform-tools
+    to: platform-tools
 
 asar: true
 # 브라우저는 extraResources라 애초에 asar 밖이지만, 혹시 모를 압축을 막는다.

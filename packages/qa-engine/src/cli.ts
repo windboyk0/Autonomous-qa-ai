@@ -42,6 +42,14 @@ const USAGE = `
 대상 (모드는 준 것에 따라 정해진다)
   --url <URL>              대상 관리자웹 주소
   --source <DIR>           대상 프로젝트 폴더
+  --package <PKG>          대상 Android 앱 패키지 (앱 QA)
+
+앱 QA (Android 전용)
+  --device <SERIAL>        기기 시리얼. 여러 대면 반드시 지정
+  --adb <PATH>             adb 경로. 비우면 동봉본·PATH·SDK 순으로 찾는다
+  --app-status             adb·기기·앱 설치 상태만 확인하고 끝낸다
+  --app-steps <N>          탐색 스텝 상한 (기본 80)
+  --try-risky-last         출근하기·퇴근하기 같은 되돌릴 수 없는 동작을 맨 끝에 1회 시도
 
 소스 QA
   --change-impact          이번 변경(git)이 닿는 화면부터 본다
@@ -121,14 +129,21 @@ async function resolvePassword(args: RawArgs): Promise<{ password: string; warni
 function buildConfig(args: RawArgs, password: string): RunConfig {
   const url = typeof args.url === "string" ? args.url : "";
   const sourceDir = typeof args.source === "string" ? args.source : "";
+  const packageName = typeof args.package === "string" ? args.package : "";
 
   // 모드는 따로 받지 않는다. **무엇을 줬는지가 곧 모드다.**
   // 플래그를 하나 더 두면 "--mode source 인데 --url 을 줬다" 같은 모순이 생긴다.
-  if (!url && !sourceDir) {
+  if (!url && !sourceDir && !packageName) {
     process.stderr.write(USAGE + "\n");
     process.exit(2);
   }
-  const mode = url && sourceDir ? "integrated" : url ? "runtime" : "source";
+  const mode = packageName
+    ? "app"
+    : url && sourceDir
+      ? "integrated"
+      : url
+        ? "runtime"
+        : "source";
 
   const str = (k: string, d = ""): string => (typeof args[k] === "string" ? (args[k] as string) : d);
   const num = (k: string, d: number): number => {
@@ -137,7 +152,10 @@ function buildConfig(args: RawArgs, password: string): RunConfig {
   };
 
   const parsed = RunConfig.safeParse({
-    projectName: str("name", url ? new URL(url).host : sourceDir.split(/[\\/]/).pop() || "project"),
+    projectName: str(
+      "name",
+      packageName || (url ? new URL(url).host : sourceDir.split(/[\\/]/).pop() || "project"),
+    ),
     mode,
     targetUrl: url,
     source: {
@@ -147,6 +165,13 @@ function buildConfig(args: RawArgs, password: string): RunConfig {
       changeBase: str("change-base"),
       allowBuild: args["allow-build"] === true,
       allowTest: args["allow-test"] === true,
+    },
+    app: {
+      packageName,
+      deviceSerial: str("device"),
+      adbPath: str("adb"),
+      maxSteps: num("app-steps", 80),
+      tryRiskyLast: args["try-risky-last"] === true,
     },
     startPath: str("start-path", "/"),
     headless: args.headless === true,
@@ -205,6 +230,21 @@ async function main(): Promise<void> {
    * 그러면 Playwright 까지 main 번들에 딸려 들어간다. 엔진에게 물어보는 편이 낫다 —
    * 찾기 규칙도 한 곳에만 있게 된다.
    */
+  /*
+   * 앱 QA 사전 점검. Electron 이 시작 전에 물어본다.
+   * 엔진 모듈을 main 프로세스로 import 하지 않기 위해 여기 둔다(Claude 상태와 같은 이유).
+   */
+  if (args["app-status"] === true) {
+    const { preflightApp } = await import("./app/preflight.js");
+    const result = preflightApp({
+      adbPath: typeof args["adb"] === "string" ? args["adb"] : "",
+      deviceSerial: typeof args["device"] === "string" ? args["device"] : "",
+      packageName: typeof args["package"] === "string" ? args["package"] : "",
+    });
+    process.stdout.write(JSON.stringify(result) + "\n");
+    return;
+  }
+
   if (args["claude-status"] === true) {
     const { ClaudeProvider } = await import("./ai/claude.js");
     const { resolveClaudeCli } = await import("./ai/claude-cli.js");

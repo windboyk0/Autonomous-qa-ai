@@ -12,7 +12,14 @@ import { useStore } from "../store.js";
 export function Setup() {
   const { selectedProjectId, go, beginRun, setError, lastError } = useStore();
 
-  const [mode, setMode] = useState<"runtime" | "source" | "integrated">("runtime");
+  const [mode, setMode] = useState<"runtime" | "source" | "integrated" | "app">("runtime");
+  const [packageName, setPackageName] = useState("");
+  const [deviceSerial, setDeviceSerial] = useState("");
+  const [tryRiskyLast, setTryRiskyLast] = useState(false);
+
+  type AppStatus = Awaited<ReturnType<ReturnType<typeof qa>["app"]["status"]>>;
+  const [device, setDevice] = useState<AppStatus | null>(null);
+  const [deviceBusy, setDeviceBusy] = useState(false);
   const [sourceDir, setSourceDir] = useState("");
   const [changeImpact, setChangeImpact] = useState(false);
   const [allowBuild, setAllowBuild] = useState(false);
@@ -110,9 +117,10 @@ export function Setup() {
       projectName: name || "프로젝트",
       mode,
       // 실행이 없는 모드에 URL을 넘기면 스키마가 거부한다. 모드가 요구하는 것만 채운다.
-      targetUrl: mode === "source" ? "" : targetUrl,
+      targetUrl: mode === "source" || mode === "app" ? "" : targetUrl,
+      app: { packageName, deviceSerial, tryRiskyLast },
       source: {
-        rootDir: mode === "runtime" ? "" : sourceDir,
+        rootDir: mode === "runtime" || mode === "app" ? "" : sourceDir,
         changeImpact: changeImpact && sourceDir.trim() !== "",
         allowBuild,
         allowTest,
@@ -176,6 +184,30 @@ export function Setup() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [provider]);
 
+  /**
+   * 앱 QA 사전 점검.
+   *
+   * adb·기기·앱 설치를 **시작 전에** 확인한다. 기기가 없는 채로 시작하면
+   * 아무것도 못 하고 끝나는데, 그 사실을 끝나서야 알게 된다.
+   */
+  const checkDevice = async (): Promise<void> => {
+    setDeviceBusy(true);
+    try {
+      setDevice(await qa().app.status({ packageName, deviceSerial, adbPath: "" }));
+    } finally {
+      setDeviceBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    if (mode !== "app") {
+      setDevice(null);
+      return;
+    }
+    void checkDevice();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode, packageName, deviceSerial]);
+
   const blockReason = ((): string | null => {
     if (preflightError) return `실행 환경을 확인하지 못했습니다: ${preflightError}`;
     if (!preflight) return "실행 환경을 확인하는 중입니다…";
@@ -183,11 +215,17 @@ export function Setup() {
     if (preflight.running) return "이미 실행 중인 Run이 있습니다. 끝나면 다시 시도하세요.";
     if (selectedProjectId === null) return "프로젝트를 먼저 선택하세요.";
     // 모드마다 필요한 입력이 다르다. 필요 없는 것을 요구하면 시작조차 못 한다.
-    if (mode !== "source" && !targetUrl.trim()) return "Target URL을 입력하세요.";
-    if (mode !== "runtime" && !sourceDir.trim()) return "QA할 프로젝트 폴더를 고르세요.";
-    if (mode !== "source" && useLogin && !username.trim())
+    if (mode !== "source" && mode !== "app" && !targetUrl.trim()) return "Target URL을 입력하세요.";
+    if (mode !== "runtime" && mode !== "app" && !sourceDir.trim())
+      return "QA할 프로젝트 폴더를 고르세요.";
+    if (mode === "app" && !packageName.trim()) return "대상 앱의 패키지명을 입력하세요.";
+    // 기기가 준비되지 않은 채 시작하면 아무것도 못 하고 끝난다. 미리 막는다.
+    if (mode === "app" && device !== null && !device.ok) {
+      return device.remediation ? `${device.detail} ${device.remediation}` : device.detail;
+    }
+    if (mode !== "source" && mode !== "app" && useLogin && !username.trim())
       return "로그인을 쓰려면 아이디가 필요합니다.";
-    if (mode !== "source" && useLogin && !password && !hasStoredPassword)
+    if (mode !== "source" && mode !== "app" && useLogin && !password && !hasStoredPassword)
       return "비밀번호를 입력하세요.";
     if (del && !deleteConsent) return "삭제 테스트에 동의해야 시작할 수 있습니다.";
     // 모델 없이 Ollama를 켜면 엔진이 헬스체크에서 떨어진다. 여기서 미리 막는다.
@@ -308,13 +346,95 @@ export function Setup() {
             <b>통합 QA</b> — 폴더 + URL + 계정. 화면 오류를 소스까지 추적
           </span>
         </label>
+        <label className="row">
+          <input
+            type="radio"
+            name="qa-mode"
+            checked={mode === "app"}
+            onChange={() => setMode("app")}
+            data-testid="mode-app"
+          />
+          <span>
+            <b>앱 QA</b> — Android 기기. 화면 자율 탐색·크래시·예외·멈춤
+          </span>
+        </label>
         <p className="hint">
           실행 QA는 권한 검사 누락을 원리적으로 찾을 수 없습니다 — 위험한 버튼은 누르지 않는 것이
           정답이기 때문입니다. 소스 QA는 반대로 화면이 실제로 뜨는지 알 수 없습니다.
         </p>
       </section>
 
-      {mode !== "runtime" && (
+      {mode === "app" && (
+        <section className="card">
+          <h2>대상 앱 (Android)</h2>
+          <label>
+            패키지명
+            <input
+              value={packageName}
+              onChange={(e) => setPackageName(e.target.value)}
+              data-testid="cfg-package"
+              placeholder="com.example.myapp"
+            />
+          </label>
+
+          {device !== null && device.devices.length > 1 && (
+            <label>
+              기기
+              <select
+                value={deviceSerial}
+                onChange={(e) => setDeviceSerial(e.target.value)}
+                data-testid="cfg-device"
+              >
+                <option value="">기기를 선택하세요</option>
+                {device.devices.map((d) => (
+                  <option key={d.serial} value={d.serial}>
+                    {d.serial}
+                    {d.model ? ` (${d.model})` : ""}
+                    {d.state !== "device" ? ` — ${d.state}` : ""}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
+          {deviceBusy && <p className="hint">기기를 확인하는 중…</p>}
+          {!deviceBusy && device !== null && (
+            <div className={device.ok ? "alert-ok" : "alert-warn"} data-testid="device-status">
+              <b>{device.ok ? "준비됨" : "준비되지 않음"}</b>
+              <div className="mt-1">{device.detail}</div>
+              {device.remediation && <div className="mt-1">{device.remediation}</div>}
+              <button
+                className="btn-ghost mt-2"
+                disabled={deviceBusy}
+                data-testid="device-recheck"
+                onClick={() => void checkDevice()}
+              >
+                다시 확인
+              </button>
+            </div>
+          )}
+
+          {/*
+            출근하기·퇴근하기 같은 동작은 **실제 기록을 남긴다.** 웹의 삭제 동의와 같은
+            성격이라 별도 동의를 받고, 켜도 탐색 맨 마지막에 한 번씩만 시도한다.
+          */}
+          <label className="row">
+            <input
+              type="checkbox"
+              checked={tryRiskyLast}
+              onChange={(e) => setTryRiskyLast(e.target.checked)}
+              data-testid="cfg-risky-last"
+            />
+            <span>되돌릴 수 없는 동작(출근하기·퇴근하기 등)을 맨 마지막에 1회 시도</span>
+          </label>
+          <p className="hint">
+            켜지 않으면 이런 버튼은 누르지 않고 <b>미검증</b>으로 리포트에 남깁니다. adb 는
+            설치본에 동봉되어 있어 따로 설치할 것이 없습니다.
+          </p>
+        </section>
+      )}
+
+      {mode !== "runtime" && mode !== "app" && (
         <section className="card">
           <h2>프로젝트 폴더</h2>
           <label>
@@ -405,7 +525,7 @@ export function Setup() {
           프로젝트명
           <input value={name} onChange={(e) => setName(e.target.value)} data-testid="cfg-name" />
         </label>
-        {mode !== "source" && (
+        {mode !== "source" && mode !== "app" && (
           <>
             <label>
               Target URL
@@ -427,7 +547,7 @@ export function Setup() {
         )}
       </section>
 
-      {mode !== "source" && (
+      {mode !== "source" && mode !== "app" && (
       <section className="card">
         <h2>로그인</h2>
         <label className="row">

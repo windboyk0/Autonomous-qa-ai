@@ -9,11 +9,12 @@
     "dev": "vite",
     "build": "node scripts/build-main.mjs && vite build",
     "stage": "node scripts/stage-resources.mjs",
-    "package": "pnpm build && pnpm icon && pnpm stage && electron-builder --win --config electron-builder.yml",
+    "package": "pnpm build && pnpm icon && pnpm adb && pnpm stage && electron-builder --win --config electron-builder.yml",
     "typecheck": "tsc -p tsconfig.electron.json --noEmit && tsc -p tsconfig.json --noEmit",
     "start": "electron .",
     "test": "vitest run",
-    "icon": "electron scripts/make-icon.mjs"
+    "icon": "electron scripts/make-icon.mjs",
+    "adb": "node scripts/fetch-adb.mjs"
   },
   "dependencies": {
     "//": "여기 있는 것만 설치본의 node_modules 로 들어간다. @qa/shared·zod 는 esbuild가 main.cjs 에 인라인하므로 넣지 않는다 — 넣으면 electron-builder 가 워크스페이스 심볼릭 링크를 따라가 앱 폴더 밖 파일을 asar 에 넣으려다 실패한다.",

@@ -13,6 +13,10 @@ const api = {
     save: (input: unknown) => ipcRenderer.invoke("projects:save", input),
     remove: (id: number) => ipcRenderer.invoke("projects:delete", id),
   },
+  app: {
+    status: (input: { packageName: string; deviceSerial: string; adbPath: string }) =>
+      ipcRenderer.invoke("app:status", input),
+  },
   dialog: {
     pickFolder: () => ipcRenderer.invoke("dialog:pickFolder"),
   },

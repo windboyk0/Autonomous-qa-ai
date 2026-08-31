@@ -46,6 +46,18 @@ export interface QaApi {
     }): Promise<number>;
     remove(id: number): Promise<void>;
   };
+  app: {
+    status(input: { packageName: string; deviceSerial: string; adbPath: string }): Promise<{
+      ok: boolean;
+      adbPath: string | null;
+      devices: Array<{ serial: string; state: string; model: string | null }>;
+      device: { serial: string; state: string; model: string | null } | null;
+      packageInstalled: boolean | null;
+      screen: { width: number; height: number } | null;
+      detail: string;
+      remediation: string | null;
+    }>;
+  };
   dialog: {
     pickFolder(): Promise<{ ok: boolean; dir: string | null }>;
   };

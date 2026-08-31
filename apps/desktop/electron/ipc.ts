@@ -3,7 +3,7 @@ import { join, resolve } from "node:path";
 import { spawn } from "node:child_process";
 import { BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { RunConfig, type EngineEvent, type Issue, type RunSummary } from "@qa/shared";
-import { EngineProcess, resolveEnginePath } from "./engine.js";
+import { EngineProcess, resolveBundledAdb, resolveEnginePath } from "./engine.js";
 import { credentialStatus, decryptPassword, encryptPassword } from "./credentials.js";
 import type { ProjectRow, RunRow, Store } from "./store.js";
 
@@ -40,6 +40,18 @@ export type RunLifecycle =
       /** 증적 폴더. 실패해도 증적은 대개 남아 있다. */
       runDir: string | null;
     };
+
+/** 앱 QA 사전 점검 결과. 렌더러와 같은 모양을 쓴다. */
+export interface AppStatus {
+  ok: boolean;
+  adbPath: string | null;
+  devices: Array<{ serial: string; state: string; model: string | null }>;
+  device: { serial: string; state: string; model: string | null } | null;
+  packageInstalled: boolean | null;
+  screen: { width: number; height: number } | null;
+  detail: string;
+  remediation: string | null;
+}
 
 export class IpcLayer {
   private readonly engine = new EngineProcess();
@@ -168,6 +180,16 @@ export class IpcLayer {
   ipcMain.handle("ai:claudeStatus", async () => this.claudeStatus());
 
   /**
+   * 앱 QA 사전 점검.
+   *
+   * adb 가 없는 것, 기기가 없는 것, USB 디버깅을 허용하지 않은 것, 앱이 안 깔린 것은
+   * 각각 조치가 다르다. 하나로 뭉뚱그리면 사용자는 무엇을 해야 할지 모른다.
+   */
+  ipcMain.handle("app:status", async (_e, input: { packageName: string; deviceSerial: string; adbPath: string }) =>
+    this.appStatus(input),
+  );
+
+  /**
    * Claude 로그인.
    *
    * `claude auth login` 은 브라우저를 열고 사용자 입력을 기다리는 **대화형** 명령이다.
@@ -255,17 +277,38 @@ export class IpcLayer {
    * 경로 탈출 방지.
    * 렌더러가 보낸 상대경로를 그대로 붙이면 `../../` 로 아무 파일이나 읽을 수 있다.
    */
-  /** 엔진을 짧게 띄워 Claude 상태만 물어본다. */
-  private claudeStatus(): Promise<{
-    ok: boolean;
-    detail: string;
-    remediation: string | null;
-    needsLogin: boolean;
-    exe: string | null;
-  }> {
-    return new Promise((resolve) => {
-      const fail = (detail: string) =>
-        resolve({ ok: false, detail, remediation: null, needsLogin: false, exe: null });
+  /** 엔진을 짧게 띄워 adb·기기·앱 설치 상태를 물어본다. */
+  private appStatus(input: {
+    packageName: string;
+    deviceSerial: string;
+    adbPath: string;
+  }): Promise<AppStatus> {
+    const args = ["--app-status", "--package", input.packageName];
+    if (input.deviceSerial) args.push("--device", input.deviceSerial);
+    if (input.adbPath) args.push("--adb", input.adbPath);
+    return this.askEngine<AppStatus>(args, {
+      ok: false,
+      adbPath: null,
+      devices: [],
+      device: null,
+      packageInstalled: null,
+      screen: null,
+      detail: "상태를 확인하지 못했습니다.",
+      remediation: null,
+    });
+  }
+
+  /**
+   * 엔진을 짧게 띄워 상태만 물어본다.
+   *
+   * main 프로세스가 직접 확인하려면 엔진 모듈을 import 해야 하고, 그러면 Playwright 까지
+   * main 번들에 딸려 들어간다. 판정 규칙도 두 곳에 생긴다. 엔진에게 묻는 편이 낫다.
+   *
+   * `onFail` 은 실패했을 때 돌려줄 모양이다 — 호출자마다 필드가 달라서 받는다.
+   */
+  private askEngine<T extends { detail: string }>(args: string[], onFail: T): Promise<T> {
+    return new Promise((resolveResult) => {
+      const fail = (detail: string) => resolveResult({ ...onFail, detail });
 
       let enginePath: string;
       try {
@@ -275,8 +318,12 @@ export class IpcLayer {
         return;
       }
 
-      const child = spawn(process.execPath, [enginePath, "--claude-status"], {
-        env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+      const child = spawn(process.execPath, [enginePath, ...args], {
+        env: {
+          ...process.env,
+          ELECTRON_RUN_AS_NODE: "1",
+          ...(resolveBundledAdb() ? { QA_ADB_PATH: resolveBundledAdb()! } : {}),
+        },
         windowsHide: true,
       });
 
@@ -292,7 +339,7 @@ export class IpcLayer {
       child.on("close", (code) => {
         const last = out.trim().split(/\r?\n/).pop() ?? "";
         try {
-          resolve(JSON.parse(last));
+          resolveResult(JSON.parse(last) as T);
         } catch {
           /*
            * 무엇이 왔는지 보여준다. 실측에서 오래된 엔진 번들이 USAGE 를 출력하는 바람에
@@ -304,6 +351,23 @@ export class IpcLayer {
           );
         }
       });
+    });
+  }
+
+  /** 엔진을 짧게 띄워 Claude 상태만 물어본다. */
+  private claudeStatus(): Promise<{
+    ok: boolean;
+    detail: string;
+    remediation: string | null;
+    needsLogin: boolean;
+    exe: string | null;
+  }> {
+    return this.askEngine(["--claude-status"], {
+      ok: false,
+      detail: "상태를 확인하지 못했습니다.",
+      remediation: null,
+      needsLogin: false,
+      exe: null,
     });
   }
 

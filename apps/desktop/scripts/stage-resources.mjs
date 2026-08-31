@@ -9,7 +9,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /**
@@ -137,6 +137,24 @@ for (const name of wanted) {
 // Playwright가 캐시 디렉터리로 인식하도록 표식을 남긴다.
 writeFileSync(join(browsers, ".links"), "");
 
+/*
+ * adb.
+ *
+ * 앱 QA 는 adb 없이는 한 줄도 못 돈다. Chromium 을 동봉한 것과 같은 이유로 넣는다 —
+ * 사용자가 Android SDK 를 따로 깔아야 한다면 "설치 후 5분 내 QA 시작"이 깨진다.
+ * 8MB 라 설치본 크기에 사실상 영향이 없다.
+ */
+const adbSrc = join(appRoot, "vendor", "platform-tools");
+const adbDst = join(resources, "platform-tools");
+if (!existsSync(join(adbSrc, "adb.exe"))) {
+  throw new Error(
+    `adb 가 준비되지 않았습니다: ${adbSrc}\n먼저 \`node scripts/fetch-adb.mjs\` 를 실행하세요.`,
+  );
+}
+rmSync(adbDst, { recursive: true, force: true });
+cpSync(adbSrc, adbDst, { recursive: true });
+
 console.log(`[stage] engine   ${mb(join(resources, "engine"))} MB`);
+console.log(`[stage] adb      ${mb(adbDst)} MB`);
 console.log(`[stage] browsers ${mb(browsers)} MB (${wanted.join(", ")})`);
 console.log(`[stage] 합계     ${mb(resources)} MB`);

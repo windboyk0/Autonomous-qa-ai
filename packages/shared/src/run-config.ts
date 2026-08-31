@@ -112,7 +112,7 @@ export type AiProviderConfig = z.infer<typeof AiProviderConfig>;
  *
  * 브라우저 QA와 소스 QA는 찾는 문제가 다르다. 하나로 뭉뚱그리면 둘 다 얕아진다.
  */
-export const QaMode = z.enum(["runtime", "source", "integrated"]);
+export const QaMode = z.enum(["runtime", "source", "integrated", "app"]);
 export type QaMode = z.infer<typeof QaMode>;
 
 /**
@@ -146,6 +146,36 @@ export const SourceConfig = z.object({
   allowTest: z.boolean().default(false),
 });
 export type SourceConfig = z.infer<typeof SourceConfig>;
+
+/**
+ * 앱 QA 설정 (Android).
+ *
+ * iOS 는 대상이 아니다. adb 는 Android 전용이고, iOS 는 전송 계층이 통째로 달라
+ * 같은 설정으로 다룰 수 없다. 지원하지 않는 것을 지원하는 척하지 않는다.
+ */
+export const AppConfig = z.object({
+  /** 대상 앱 패키지. 예: com.attendance.attendance_mobile */
+  packageName: z.string().default(""),
+  /** 기기 시리얼. 비우면 붙어 있는 기기가 하나일 때만 진행한다. */
+  deviceSerial: z.string().default(""),
+  /** adb 실행 파일. 비우면 동봉본 → PATH → 알려진 SDK 위치 순으로 찾는다. */
+  adbPath: z.string().default(""),
+  /**
+   * 조작 후 화면이 안정될 때까지 기다리는 시간.
+   * 웹의 settleMs 와 같은 역할이지만, 기기는 느리므로 기본값이 더 크다.
+   */
+  settleMs: z.number().int().nonnegative().default(1_500),
+  /** 탐색 상한. 예산이 없으면 자율 탐색은 끝나지 않는다. */
+  maxSteps: z.number().int().positive().default(80),
+  maxScreens: z.number().int().positive().default(60),
+  maxDurationMs: z.number().int().positive().default(15 * 60 * 1000),
+  /**
+   * 되돌리기 어려운 동작을 **탐색 맨 마지막에 한 번씩만** 시도할지.
+   * 출근하기·퇴근하기는 실제 근태 기록을 남긴다. 기본은 하지 않는다.
+   */
+  tryRiskyLast: z.boolean().default(false),
+});
+export type AppConfig = z.infer<typeof AppConfig>;
 
 export const RunConfig = z.object({
   mode: QaMode.default("runtime"),
@@ -181,6 +211,7 @@ export const RunConfig = z.object({
   safety: SafetyPolicy.default({}),
   budget: ExploreBudget.default({}),
   source: SourceConfig.default({}),
+  app: AppConfig.default({}),
   ai: AiProviderConfig.default({}),
   /** 증적 출력 루트. 실제 Run 디렉터리는 <outDir>/<runId> */
   outDir: z.string().default("runs"),
@@ -193,14 +224,21 @@ export const RunConfig = z.object({
    * 실행 QA에서 targetUrl 없이 시작하는 것도 마찬가지다.
    */
   .superRefine((c, ctx) => {
-    if (c.mode !== "source" && c.targetUrl === "") {
+    if (c.mode === "app" && c.app.packageName.trim() === "") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["app", "packageName"],
+        message: "앱 QA 에는 대상 앱의 패키지명이 필요합니다",
+      });
+    }
+    if (c.mode !== "source" && c.mode !== "app" && c.targetUrl === "") {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["targetUrl"],
         message: `${c.mode} 모드에는 Target URL이 필요합니다`,
       });
     }
-    if (c.mode !== "runtime" && c.source.rootDir.trim() === "") {
+    if (c.mode !== "runtime" && c.mode !== "app" && c.source.rootDir.trim() === "") {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["source", "rootDir"],

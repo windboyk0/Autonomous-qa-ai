@@ -80,15 +80,25 @@ export function toCliArgs(config: RunConfig): string[] {
   ];
 
   // ── 대상 ────────────────────────────────────────────────────────────
-  if (config.mode !== "source") {
+  if (config.mode !== "source" && config.mode !== "app") {
     args.push("--url", config.targetUrl, "--start-path", config.startPath);
   }
   if (config.mode !== "runtime" && config.source.rootDir) {
     args.push("--source", config.source.rootDir);
   }
 
+  // ── 앱 QA ───────────────────────────────────────────────────────────
+  if (config.mode === "app") {
+    args.push("--package", config.app.packageName);
+    if (config.app.deviceSerial) args.push("--device", config.app.deviceSerial);
+    if (config.app.adbPath) args.push("--adb", config.app.adbPath);
+    args.push("--app-steps", String(config.app.maxSteps));
+    // 되돌릴 수 없는 동작은 **동의했을 때만** 넘긴다. 넘기지 않으면 시도하지 않는다.
+    if (config.app.tryRiskyLast) args.push("--try-risky-last");
+  }
+
   // ── 실행 QA 에만 의미 있는 것 ───────────────────────────────────────
-  if (config.mode !== "source") {
+  if (config.mode !== "source" && config.mode !== "app") {
     args.push(
       "--max-screens",
       String(config.budget.maxScreens),
@@ -105,7 +115,7 @@ export function toCliArgs(config: RunConfig): string[] {
   }
 
   // ── 소스 QA ─────────────────────────────────────────────────────────
-  if (config.mode !== "runtime") {
+  if (config.mode !== "runtime" && config.mode !== "app") {
     if (config.source.changeImpact) args.push("--change-impact");
     if (config.source.changeBase) args.push("--change-base", config.source.changeBase);
     args.push("--ai-upload", config.source.aiUpload);
@@ -120,6 +130,21 @@ export function toCliArgs(config: RunConfig): string[] {
   if (config.ai.visionCapable) args.push("--vision");
 
   return args;
+}
+
+/**
+ * 동봉한 adb 경로.
+ *
+ * 엔진은 자식 프로세스라 설치본의 resources 위치를 스스로 알지 못한다.
+ * 브라우저 경로를 알려주는 것과 같은 방식으로 환경변수에 실어 보낸다.
+ */
+export function resolveBundledAdb(): string | null {
+  const candidates = [
+    join(process.resourcesPath ?? "", "platform-tools", "adb.exe"),
+    resolve(here, "../../resources/platform-tools/adb.exe"),
+    resolve(here, "../../vendor/platform-tools/adb.exe"),
+  ];
+  return candidates.find((p) => p !== "" && existsSync(p)) ?? null;
 }
 
 export interface EngineHandlers {
@@ -156,6 +181,8 @@ export class EngineProcess {
 
     const enginePath = resolveEnginePath();
     const browsersPath = resolveBrowsersPath();
+    // 설정에서 지정한 adb 가 있으면 그것을, 없으면 동봉본을 쓴다.
+    const adbPath = config.app.adbPath.trim() !== "" ? config.app.adbPath : resolveBundledAdb();
 
     this.stopping = false;
     this.child = spawn(process.execPath, [enginePath, ...toCliArgs(config)], {
@@ -168,6 +195,8 @@ export class EngineProcess {
         ...(password ? { QA_PASSWORD: password } : {}),
         // 동봉한 브라우저를 쓰게 한다. 없으면 개발 PC의 기본 캐시를 그대로 쓴다.
         ...(browsersPath ? { PLAYWRIGHT_BROWSERS_PATH: browsersPath } : {}),
+        // 앱 QA 용 adb. 사용자가 설정에서 직접 지정하면 그쪽이 이긴다.
+        ...(adbPath ? { QA_ADB_PATH: adbPath } : {}),
         // 엔진이 INIT_CWD 기준으로 runs/ 를 만든다.
         INIT_CWD: workDir,
       },
