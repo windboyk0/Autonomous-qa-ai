@@ -1,3 +1,6 @@
+# ─────────────────────────────────────────────────────────────────────
+# 빌드 산출물
+# ─────────────────────────────────────────────────────────────────────
 node_modules/
 dist/
 build/
@@ -5,33 +8,91 @@ out/
 release/
 *.tsbuildinfo
 
-# QA 실행 산출물 (증적/리포트는 커밋하지 않는다)
-runs/
-*.db
-*.db-journal
-*.sqlite
+# Electron / Vite
+apps/desktop/dist/
+apps/desktop/release/
+# 빌드 때 stage-resources.mjs 가 다시 모은다. 크로미움까지 들어가 400MB 가 넘는다.
+apps/desktop/resources/
+# 동봉용 adb. 빌드 때 scripts/fetch-adb.mjs 가 받아 온다.
+apps/desktop/vendor/
 
-# 자격증명은 어떤 형태로도 커밋 금지
+# ─────────────────────────────────────────────────────────────────────
+# 자격증명 — 어떤 형태로도 커밋 금지
+# ─────────────────────────────────────────────────────────────────────
 .env
 .env.*
 !.env.example
 credentials.json
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+*.jks
+secrets.json
+# 예외: 소스 QA 가 "시크릿 파일을 값 없이 감지하는가"를 검증하는 픽스처.
+# 값이 전부 CHANGE_ME_fixture_only 라 실제 비밀이 아니다.
+!packages/fixture-src/project/**/secrets.properties
 
-# 동봉용 adb. 빌드 때 scripts/fetch-adb.mjs 가 받아 온다.
-apps/desktop/vendor/
+# ─────────────────────────────────────────────────────────────────────
+# QA 실행 산출물
+#
+# 증적에는 **대상 시스템의 실제 데이터**가 담긴다. 스크린샷·UI 덤프·DOM 에
+# 사람 이름, 근무지, 근태 기록이 그대로 들어 있다. 저장소에 올리면 그것이
+# 공개된다. 리포트가 필요하면 파일로 전달하지 저장소에 담지 않는다.
+# ─────────────────────────────────────────────────────────────────────
+runs/
+*.db
+*.db-journal
+*.db-wal
+*.sqlite
+*.sqlite3
 
-# Playwright
+# 같은 이유로 앱 탐색 시제품이 남긴 실기기 증적도 올리지 않는다.
+mobile/artifacts/
+mobile/report.md
+mobile/findings.md
+mobile/visited.json
+mobile/step.txt
+mobile/logmark.txt
+
+# ─────────────────────────────────────────────────────────────────────
+# 압축 파일
+#
+# 저장소에 넣을 이유가 거의 없고, 안에 무엇이 들었는지 리뷰에서 안 보인다.
+# 꼭 필요하면 `git add -f` 로 그 파일만 명시해서 넣는다.
+# ─────────────────────────────────────────────────────────────────────
+*.7z
+*.zip
+*.rar
+*.tar
+*.tar.gz
+*.tgz
+# 예외: 문서에서 참조하는 설계 보관본. 12KB 이고 docs/archive/README.md 가 가리킨다.
+!docs/archive/*.zip
+
+# ─────────────────────────────────────────────────────────────────────
+# 도구 · 로컬 설정
+# ─────────────────────────────────────────────────────────────────────
+# 사용자 PC 의 경로와 허용 목록이 들어간다. 사람마다 다르다.
+.claude/settings.local.json
+**/.claude/settings.local.json
+
 test-results/
 playwright-report/
 .playwright/
+coverage/
+*.log
+npm-debug.log*
+pnpm-debug.log*
 
-# OS / IDE
+# ─────────────────────────────────────────────────────────────────────
+# OS · IDE
+# ─────────────────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
+desktop.ini
 .vscode/
 .idea/
-
-# Electron / Vite 빌드 산출물
-apps/desktop/dist/
-apps/desktop/resources/
-apps/desktop/release/
+*.swp
+*~
