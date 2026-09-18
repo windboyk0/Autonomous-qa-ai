@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { extractSpringEndpoints, type ExtractedEndpoint } from "./endpoints.js";
 import type { ProjectScan } from "./scan.js";
@@ -106,6 +106,24 @@ export function gitChangedFiles(rootDir: string, base = ""): ChangedFiles {
   } catch {
     return { files: [], comparedWith: "", error: "비교할 이전 커밋이 없습니다." };
   }
+}
+
+/**
+ * 사용자가 준 프로그램 목록을 `ChangedFiles`로 만든다 (프로그램 범위 QA, Phase 18).
+ *
+ * `computeImpact()` 입장에서는 이 목록이 git에서 왔는지 사용자가 직접 준 것인지
+ * 구분할 이유가 없다 — `ChangedFiles`는 순수 데이터 구조다. 그래서 새 매핑 로직을
+ * 만들지 않고 이 함수 하나로 §업무11의 파이프라인을 재사용한다.
+ */
+export function explicitChangedFiles(rootDir: string, files: readonly string[]): ChangedFiles {
+  const unique = [...new Set(files.map((f) => f.trim()).filter(Boolean))];
+  const existing = unique.filter((f) => existsSync(join(rootDir, f)));
+  const missing = unique.filter((f) => !existing.includes(f));
+  return {
+    files: existing,
+    comparedWith: "사용자 지정 프로그램 목록",
+    error: missing.length > 0 ? `다음 파일을 찾을 수 없습니다: ${missing.join(", ")}` : null,
+  };
 }
 
 export interface ChangeImpact {

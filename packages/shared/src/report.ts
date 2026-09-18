@@ -53,6 +53,32 @@ export const RunSummary = z.object({
     })
     .nullable()
     .default(null),
+  /** API 직접 검증 결과 (Phase 17). apiVerify가 꺼져 있으면 null. */
+  apiVerify: z
+    .object({
+      executed: z.number().int().nonnegative(),
+      pass: z.number().int().nonnegative(),
+      fail: z.number().int().nonnegative(),
+      /** 안전 정책으로 계획만 세우고 실행하지 않은 쓰기 케이스 */
+      plannedNotExecuted: z.array(z.string()),
+      notes: z.array(z.string()),
+    })
+    .nullable()
+    .default(null),
+  /** 프로그램 범위 한정 결과 (Phase 18~19). programScope가 꺼져 있으면 null. */
+  programScope: z
+    .object({
+      inputFiles: z.array(z.string()),
+      baselineFound: z.boolean(),
+      baselineRunId: z.string().nullable(),
+      mappedScreens: z.array(
+        z.object({ screenName: z.string(), url: z.string(), confidence: z.number() }),
+      ),
+      unmatched: z.array(z.string()),
+      notes: z.array(z.string()),
+    })
+    .nullable()
+    .default(null),
   unverifiedAreas: z.array(z.string()),
 });
 export type RunSummary = z.infer<typeof RunSummary>;

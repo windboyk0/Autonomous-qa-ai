@@ -1,0 +1,113 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "fixture-admin API", "version": "1.0.0" },
+  "paths": {
+    "/api/users": {
+      "get": {
+        "security": [{ "cookieAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["id", "loginId", "name", "role", "status"],
+                    "properties": {
+                      "id": { "type": "integer" },
+                      "loginId": { "type": "string" },
+                      "name": { "type": "string" },
+                      "dept": { "type": "string" },
+                      "role": { "type": "string" },
+                      "status": { "type": "string" },
+                      "createdAt": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/surveys": {
+      "get": {
+        "security": [{ "cookieAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["id", "title", "status"],
+                    "properties": {
+                      "id": { "type": "integer" },
+                      "title": { "type": "string" },
+                      "owner": { "type": "string" },
+                      "status": { "type": "string" },
+                      "responses": { "type": "integer" },
+                      "createdAt": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "security": [{ "cookieAuth": [] }],
+        "responses": {
+          "201": { "description": "Created" }
+        }
+      }
+    },
+    "/api/depts": {
+      "get": {
+        "security": [{ "cookieAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["id", "name"],
+                    "properties": {
+                      "id": { "type": "integer" },
+                      "name": { "type": "string" },
+                      "owner": { "type": "string" }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/notice/badge": {
+      "get": {
+        "security": [{ "cookieAuth": [] }],
+        "responses": {
+          "200": { "description": "OK" }
+        }
+      }
+    },
+    "/api/stats/export": {
+      "get": {
+        "security": [{ "cookieAuth": [] }],
+        "responses": {
+          "200": { "description": "OK" }
+        }
+      }
+    }
+  }
+}

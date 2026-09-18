@@ -201,6 +201,66 @@ export const AppConfig = z.object({
 });
 export type AppConfig = z.infer<typeof AppConfig>;
 
+/**
+ * API 검증 — 화면 조작과 무관하게 엔드포인트를 직접 호출한다 (CLAUDE.md 4부, Phase 17).
+ *
+ * `manual` 케이스는 "발견"이 아니라 "사용자가 이미 아는 엔드포인트를 등록"하는 용도다.
+ * 저장소를 뒤져 엔드포인트를 추측하지 않는다 — §16-1 "저장소 전체를 넘기지 않는다"와 같은 결이다.
+ */
+export const ApiTestCase = z.object({
+  method: z.enum(["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]),
+  /** "/api/users/{id}" 처럼 경로 변수를 담을 수 있다. exampleValues로 채운다. */
+  path: z.string().min(1),
+  headers: z.record(z.string()).default({}),
+  queryParams: z.record(z.string()).default({}),
+  body: z.unknown().nullable().default(null),
+  /** {id: "1"} 처럼 경로 변수 치환값 */
+  exampleValues: z.record(z.string()).default({}),
+  /** 비우면 스펙의 responses 키에서 유도한다. */
+  expectedStatus: z.array(z.number().int()).default([]),
+  /** OpenAPI 컴포넌트 참조 또는 인라인 스키마를 가리키는 이름 */
+  expectedSchemaRef: z.string().nullable().default(null),
+  /** 스펙상 인증이 필요한 엔드포인트인가 (§1.5-5 권한 우회 탐지에 쓴다) */
+  requiresAuth: z.boolean().default(false),
+});
+export type ApiTestCase = z.infer<typeof ApiTestCase>;
+
+export const ApiVerifyConfig = z.object({
+  enabled: z.boolean().default(false),
+  specSource: z.enum(["openapi", "manual"]).default("openapi"),
+  /** openapi.json/yaml 경로. specSource가 "manual"이면 쓰지 않는다. */
+  specPath: z.string().default(""),
+  manualCases: z.array(ApiTestCase).default([]),
+  /**
+   * 쓰기 메서드(POST/PUT/PATCH) 자동 허용 여부.
+   *
+   * 기본은 계획만 세우고 실행하지 않는다(§9 Safety Policy와 같은 방어).
+   * 켜져 있어도 요청 바디에 AUTO-QA- 마커가 없으면 실행하지 않는다.
+   */
+  allowWriteMethods: z.boolean().default(false),
+  authMode: z.enum(["reuse-session", "bearer", "none"]).default("reuse-session"),
+  /** bearer 모드 전용. 비밀번호와 동일하게 registerSecret()으로 마스킹 등록한다. */
+  bearerToken: z.string().default(""),
+  timeoutMs: z.number().int().positive().default(15_000),
+});
+export type ApiVerifyConfig = z.infer<typeof ApiVerifyConfig>;
+
+/**
+ * 프로그램 소스 목록 → 연관 화면 범위 한정 (CLAUDE.md 4부, Phase 18~19).
+ *
+ * 입력은 소스 파일 경로 목록으로 확정했다 — 업무 프로그램ID 체계와의 연결은 범위 밖이다.
+ */
+export const ProgramScopeConfig = z.object({
+  enabled: z.boolean().default(false),
+  /** config.source.rootDir 기준 상대경로 목록 */
+  sourceFiles: z.array(z.string()).default([]),
+  /** 한 줄에 한 경로씩 적은 텍스트 파일. sourceFiles와 병합된다. */
+  sourceFilesListPath: z.string().default(""),
+  /** 이 값 미만의 confidence로 매핑된 화면은 탐색 대상에서 빼고 "미검증"에만 적는다. */
+  minConfidence: z.number().min(0).max(1).default(0.5),
+});
+export type ProgramScopeConfig = z.infer<typeof ProgramScopeConfig>;
+
 export const RunConfig = z.object({
   mode: QaMode.default("runtime"),
   projectName: z.string().min(1),
@@ -237,6 +297,8 @@ export const RunConfig = z.object({
   source: SourceConfig.default({}),
   app: AppConfig.default({}),
   ai: AiProviderConfig.default({}),
+  apiVerify: ApiVerifyConfig.default({}),
+  programScope: ProgramScopeConfig.default({}),
   /** 증적 출력 루트. 실제 Run 디렉터리는 <outDir>/<runId> */
   outDir: z.string().default("runs"),
 })
@@ -277,5 +339,9 @@ export function redactRunConfig(config: RunConfig): RunConfig {
   return {
     ...config,
     login: { ...config.login, password: config.login.password ? "***REDACTED***" : "" },
+    apiVerify: {
+      ...config.apiVerify,
+      bearerToken: config.apiVerify.bearerToken ? "***REDACTED***" : "",
+    },
   };
 }

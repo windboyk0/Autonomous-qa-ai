@@ -23,15 +23,9 @@ importers:
 
   apps/desktop:
     dependencies:
-      '@qa/shared':
-        specifier: workspace:*
-        version: link:../../packages/shared
       node-sqlite3-wasm:
         specifier: ^0.8.30
         version: 0.8.60
-      zod:
-        specifier: ^3.23.8
-        version: 3.25.76
     devDependencies:
       '@qa/engine':
         specifier: workspace:*
@@ -39,6 +33,9 @@ importers:
       '@qa/fixture-admin':
         specifier: workspace:*
         version: link:../../packages/fixture-admin
+      '@qa/shared':
+        specifier: workspace:*
+        version: link:../../packages/shared
       '@tailwindcss/vite':
         specifier: ^4.0.0
         version: 4.3.3(vite@5.4.21(@types/node@20.19.43)(lightningcss@1.32.0))
@@ -75,17 +72,25 @@ importers:
       vite:
         specifier: ^5.4.11
         version: 5.4.21(@types/node@20.19.43)(lightningcss@1.32.0)
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
       zustand:
         specifier: ^5.0.2
         version: 5.0.15(@types/react@18.3.31)(react@18.3.1)
 
   packages/fixture-admin: {}
 
+  packages/fixture-src: {}
+
   packages/qa-engine:
     dependencies:
       '@qa/shared':
         specifier: workspace:*
         version: link:../shared
+      js-yaml:
+        specifier: '4'
+        version: 4.3.2
       playwright:
         specifier: ^1.49.1
         version: 1.62.1
@@ -96,6 +101,12 @@ importers:
       '@qa/fixture-admin':
         specifier: workspace:*
         version: link:../fixture-admin
+      '@qa/fixture-src':
+        specifier: workspace:*
+        version: link:../fixture-src
+      '@types/js-yaml':
+        specifier: ^4.0.9
+        version: 4.0.9
 
   packages/shared:
     dependencies:
@@ -972,6 +983,9 @@ packages:
 
   '@types/http-cache-semantics@4.2.0':
     resolution: {integrity: sha512-L3LgimLHXtGkWikKnsPg0/VFx9OGZaC+eN1u4r+OB1XRqH3meBIAVC2zr1WdMH+RHmnRkqliQAOHNJ/E0j/e0Q==}
+
+  '@types/js-yaml@4.0.9':
+    resolution: {integrity: sha512-k4MGaQl5TGo/iipqb2UDG2UwjXziSWkh0uysQelTlJpX1qGlpUZYm8PnO4DxG1qBomtJUdYJ6qR6xdIah10JLg==}
 
   '@types/keyv@3.1.4':
     resolution: {integrity: sha512-BQ5aZNSCpj7D6K2ksrRCTmKRLEpnPvWDiLPfoGyhZ++8YtiK9d/3DBKPJgry359X/P1PfruyYwvnvwFjuEiEIg==}
@@ -3294,6 +3308,8 @@ snapshots:
       '@types/node': 20.19.43
 
   '@types/http-cache-semantics@4.2.0': {}
+
+  '@types/js-yaml@4.0.9': {}
 
   '@types/keyv@3.1.4':
     dependencies:

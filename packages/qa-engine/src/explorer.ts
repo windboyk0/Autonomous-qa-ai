@@ -60,6 +60,19 @@ function planSignature(plan: Plan): string {
   );
 }
 
+/**
+ * 프로그램 범위 한정 (CLAUDE.md 4부, Phase 19).
+ *
+ * `impactHints`와 다르다 — 힌트는 **순서만** 바꾸는 비파괴적 힌트고, 이것은 **범위 자체를
+ * 제한한다.** 그래서 같은 필드에 얹지 않고 별도 파라미터로 분리했다.
+ */
+export interface AllowedScope {
+  /** 탐색 큐를 이 시드들로만 초기화한다. */
+  seedUrls: readonly string[];
+  /** 이 밖으로 이어지는 링크는(같은 화면 안의 액션은 예외) 더 이상 확장하지 않는다. */
+  allowedPathTemplates: ReadonlySet<string>;
+}
+
 export interface ExploreResult {
   graph: StateGraph;
   actionResults: ActionResult[];
@@ -95,6 +108,11 @@ export class Explorer {
      * 그 사실이 리포트에 "정상"으로 읽힌다.
      */
     private readonly impactHints: readonly string[] = [],
+    /**
+     * 화면 범위 자체를 제한한다. 없으면(`null`) 기존 동작과 완전히 동일하다 — 회귀 없음
+     * (CLAUDE.md 4부 §2.5 "programScope.enabled === false 면 기존 동작과 완전 동일").
+     */
+    private readonly allowedScope: AllowedScope | null = null,
   ) {}
 
   private get allowedOrigins(): string[] {
@@ -105,6 +123,26 @@ export class Explorer {
   private sameSite(url: string): boolean {
     try {
       return this.allowedOrigins.includes(new URL(url).origin);
+    } catch {
+      return false;
+    }
+  }
+
+  /** 두 URL이 다른 경로(pathTemplate)를 가리키는가. 쿼리·모달 상태는 같은 경로로 본다. */
+  private isDifferentRoute(a: string, b: string): boolean {
+    try {
+      return pathTemplate(new URL(a).pathname) !== pathTemplate(new URL(b).pathname);
+    } catch {
+      return false;
+    }
+  }
+
+  /** href가 programScope로 매핑된 화면 중 하나로 이어지는가. */
+  private inAllowedScope(href: string): boolean {
+    if (!this.allowedScope) return true;
+    try {
+      const template = pathTemplate(new URL(href).pathname);
+      return this.allowedScope.allowedPathTemplates.has(template);
     } catch {
       return false;
     }
@@ -231,6 +269,14 @@ export class Explorer {
         this.record(action, "SKIPPED_DENYLIST", `허용되지 않은 origin: ${new URL(href).origin}`);
         return;
       }
+      if (href && this.allowedScope && !this.inAllowedScope(href)) {
+        this.record(
+          action,
+          "SKIPPED_SCOPE",
+          "programScope 범위 밖: 매핑되지 않은 화면으로 이어지는 링크라 확장하지 않습니다.",
+        );
+        return;
+      }
       if (href) {
         const queued = this.enqueue({
           url: href,
@@ -287,13 +333,28 @@ export class Explorer {
     });
 
     if (changed && !this.visitedStates.has(after.stateKey)) {
-      // 클릭으로만 도달하는 화면(모달·탭)이다. 재생 계획으로 큐에 넣는다.
-      this.enqueue({
-        url: plan.url,
-        replay: [...plan.replay, { selector: action.selector, label: action.label }],
-        depth: plan.depth + 1,
-        viaActionId: action.id,
-      });
+      /*
+       * 여기로 오는 액션 중 일부는 모달·탭(같은 경로, URL 안 바뀜)이 아니라
+       * data-testid가 달린 `<a>` 태그다 — `actionTypeOf`는 태그만 보고 NAVIGATE로
+       * 분류하지만, testid 셀렉터는 위 "링크는 계획만 만든다" 빠른 경로의
+       * `a[href` css 조건에 걸리지 않아 실제로 클릭된다. 경로 자체가 바뀌었다면
+       * 이것도 "새로운 다른 화면으로 이어지는 링크"이므로 같은 범위 게이트를 적용한다.
+       * 경로가 같으면(모달·탭) 범위와 무관하게 항상 허용한다.
+       */
+      const newRoute = this.isDifferentRoute(plan.url, after.url);
+      if (newRoute && this.allowedScope && !this.inAllowedScope(after.url)) {
+        this.limits.push(
+          `programScope 범위 밖: "${action.label}" 클릭이 매핑되지 않은 화면(${after.url})으로 이동해 더 탐색하지 않습니다.`,
+        );
+      } else {
+        // 클릭으로만 도달하는 화면(모달·탭)이다. 재생 계획으로 큐에 넣는다.
+        this.enqueue({
+          url: plan.url,
+          replay: [...plan.replay, { selector: action.selector, label: action.label }],
+          depth: plan.depth + 1,
+          viaActionId: action.id,
+        });
+      }
     }
 
     // 다음 액션은 원래 화면에서 이어가야 한다.
@@ -337,7 +398,20 @@ export class Explorer {
   }
 
   async explore(startPlan: Plan): Promise<ExploreResult> {
-    this.enqueue(startPlan);
+    /*
+     * 범위가 한정되어 있으면 큐를 그 시드들로만 초기화한다 — 진입 화면(startPlan)은
+     * 매핑된 화면이 아니면 포함하지 않는다. "그 화면들만 본다"가 이 기능의 전부다.
+     */
+    if (this.allowedScope) {
+      for (const url of this.allowedScope.seedUrls) {
+        this.enqueue({ url, replay: [], depth: 0, viaActionId: null });
+      }
+      if (this.queue.length === 0) {
+        this.limits.push("programScope: 매핑된 화면이 없어 탐색할 대상이 없습니다.");
+      }
+    } else {
+      this.enqueue(startPlan);
+    }
 
     while (this.queue.length > 0) {
       // 일시정지는 화면 하나를 다 보고 나서 걸린다.
