@@ -50,3 +50,12 @@ Phase 11(통합 Root Cause)과 Phase 10(Change Impact)의 채점 기준.
 
 - **Express / Next.js 라우트 매핑.** 이 fixture는 Spring만 다룬다.
   Node 백엔드를 지원하려면 별도 fixture가 필요하다. Phase 11에서 범위를 정한다.
+
+## Phase 18 — 프로그램 소스 목록 → 연관 화면 정답지로도 쓰인다
+
+`KNOWN_CALL_SITES`의 `screenFiles`가 그대로 "파일 목록 → 화면" 정답지다.
+`UserController.java`를 프로그램 목록으로 주면 `UserList.tsx`·`UserForm.tsx`가
+매핑되어야 하고, `DeptController.java`를 주지 않으면 부서 화면은 매핑되면 안 된다
+(확대 해석 금지). `/api/users/:id` (DELETE)의 `screenFiles: []`는 "아직 화면이
+파악되지 않은 호출"의 실제 사례로, 매핑 실패(미검증) 케이스로 그대로 재사용한다.
+채점은 `packages/qa-engine/src/source/program-scope.test.ts`.

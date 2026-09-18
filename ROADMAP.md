@@ -691,6 +691,139 @@ Electron 앱은 로그인 셸을 거치지 않아 사용자 터미널의 PATH �
 
 ---
 
+# 4부 — API 검증 + 프로그램 범위 QA (Phase 17 ~ 19)
+
+`vibeContext/apiVerifyAndProgramScope.md`가 `analyResult.md` §0-1·§0-3이 지적한
+두 가지 편차 — "부분 검수 기능이 없다", "API를 화면 유발 요청으로만 관측한다" — 를
+메우기 위해 쓴 설계 문서다. 이 3개 Phase가 그 구현이다.
+
+새 파이프라인을 만들지 않는다(§30). `IssueCandidate`/`judge()`/`report.md`를 그대로
+재사용하고, `computeImpact()`(Phase 10)를 `explicitChangedFiles()`로 확장해
+프로그램 범위 매핑에도 그대로 쓴다.
+
+## Phase 17 — API 검증 엔진 ✅
+
+- [x] `api-verify.ts` — OpenAPI(JSON/YAML) 파싱, 직접 호출, 최소 스키마 검증
+- [x] 안전 정책 — GET/HEAD 자동 허용, 쓰기 메서드는 `allowWriteMethods` +
+      요청에 AUTO-QA 마커가 있을 때만 실행, DELETE는 `deleteConsent`도 추가로 필요
+- [x] 인증 — `reuse-session`(Playwright `context.request`로 로그인 쿠키 재사용, 기본값) /
+      `bearer` / `none`
+- [x] 새 `ruleId`: `API-STATUS-MISMATCH` · `API-SCHEMA-INVALID` · `API-TIMEOUT` ·
+      `API-UNREACHABLE` · `API-AUTH-BYPASS`(보너스, 비로그인 재호출로 권한 우회 탐지)
+- [x] `fixture-admin/openapi.json` + `KNOWN_API_CASES.md` — GET 5건 중 알려진 결함
+      2건(BUG-01·BUG-02 재사용) 전부 탐지, 나머지 3건 오탐 0건
+
+**DoD 결과 — 통과 (`api-verify.test.ts` 10건)**
+
+| 검증 | 결과 |
+|---|---|
+| GET 5건 중 알려진 결함 2건 탐지 | 2/2 (`/api/notice/badge`, `/api/stats/export`) |
+| 나머지 GET 3건 오탐 | 0건 |
+| 500(export)은 HIGH, 404(badge)는 상태코드 불일치로 검출 | 통과 |
+| 쓰기 메서드 기본 미실행 | 통과 (POST 계획만 생성, 실행 0건) |
+| AUTO-QA 마커 없이 `allowWriteMethods`만 켜도 미실행 | 통과 |
+| `allowWriteMethods` + AUTO-QA 마커 → 실행 | 통과 (PASS 1) |
+| DELETE는 `allowWriteMethods`만으로 부족(`deleteConsent` 필요) | 통과 |
+| `apiVerify.enabled=false` → `summary.apiVerify === null`(회귀 없음) | 통과 |
+
+### 확정된 설계
+
+- **응답 본문은 저장하지 않는다는 기존 원칙(§16)과 정면 충돌**해서, 절충안을
+  채택했다 — 검증에 성공한 필드는 값이 아니라 **이름·타입만** 증적에 남기고,
+  실패했을 때만 마스킹된 값 일부를 남긴다.
+- **스키마 검증은 ajv를 쓰지 않는다.** 필수 필드·타입만 보는 최소 구현이고,
+  `additionalProperties`는 항상 허용한다 — 모르는 필드로 실패시키면 오탐이
+  쏟아진다(§30 "오탐을 늘리는 자체 검출기 금지"와 같은 이유).
+- **쓰기 호출의 유일한 실행 근거는 AUTO-QA 마커다.** 스펙만 보고 요청 바디를
+  자동 생성해 실제로 쏘면 실 데이터를 오염시킬 수 있다. §10 CRUD 데이터
+  소유권 원칙을 API 직접 호출에도 그대로 적용했다.
+- **저장소 전체에서 엔드포인트를 추측하지 않는다.** 명세(OpenAPI) 또는
+  `manualCases`에 있는 것만 부른다 — §16-1과 같은 결이지만, 여기서는 실제
+  HTTP 부작용이 걸려 있어 더 보수적이다.
+
+## Phase 18 — 프로그램 소스 매핑 ✅
+
+- [x] `source/change-impact.ts::explicitChangedFiles()` — 사용자 지정 파일 목록을
+      `ChangedFiles`로 만들어 `computeImpact()`를 그대로 재사용 (새 매핑 로직 없음)
+- [x] `source/program-scope.ts` — 안 A(캐시 기반) 채택. 과거 전체 탐색 Run의
+      `graph.json` + `evidence.json`(network 증적)에서 "화면이 실제로 호출한
+      엔드포인트"의 역인덱스를 만들고, 이번 변경의 엔드포인트와 대조한다
+- [x] confidence 3단계 — 엔드포인트 정확 일치(1.0) · 경로만 일치(0.8) ·
+      낱말 힌트 일치(0.5, 추정) — `minConfidence` 미만은 미검증으로만 남긴다
+- [x] 베이스라인이 없으면 매핑하지 않고 전체 탐색으로 대체한다는 사실을 명시
+
+**DoD 결과 — 통과 (`source/program-scope.test.ts` 8건)**
+
+| 검증 | 결과 |
+|---|---|
+| `UserController.java`만 주면 사용자 화면만 매핑(부서 화면 제외) | 통과 |
+| 정확히 일치한 엔드포인트는 confidence 1.0 | 통과 |
+| 베이스라인에 없는 엔드포인트(`DELETE /api/users/:id`)는 미검증으로 남음 | 통과 |
+| `DeptController.java`를 추가하면 부서 화면까지 매핑됨 | 통과 |
+| 베이스라인 없음 → 전체 탐색 대체 + 근거 기록 | 통과 |
+| `minConfidence`로 낱말 힌트 매칭(0.5) 포함/제외 전환 | 통과 |
+| 존재하지 않는 파일은 근거에 남기고 나머지로 진행 | 통과 |
+
+정답지는 새로 만들지 않고 **`fixture-src/KNOWN_ENDPOINTS.md`의 `KNOWN_CALL_SITES`를
+그대로 재사용했다** — `screenFiles`가 이미 "파일 목록 → 화면" 매핑이었고,
+`/api/users/:id`(DELETE)의 `screenFiles: []`는 실측에서 나온 "아직 화면이 파악되지
+않은 호출"의 실제 사례라 미검증 케이스로 그대로 들어맞았다.
+
+### 확정된 설계
+
+- **호출 그래프를 만들지 않는다(§11과 같은 원칙).** 화면이 어느 API를 부르는지는
+  브라우저가 실제로 방문해 관측했을 때만 안다. 정적 라우터 파싱(안 B)은
+  프레임워크마다 별도 파서가 필요하고 동적 라우트에서 오탐이 잦아 기각했다.
+- **베이스라인은 URL만 있으면 충분하다.** 모달·탭처럼 URL이 없는 상태는 원래
+  `Plan.replay`(클릭 목록)로만 재현되는데, 그 selector는 그래프에 저장되지
+  않는다. 대신 "매핑된 화면(부모 URL)을 시드로 방문하면, 그 화면 안의 액션은
+  Explorer가 어차피 전부 다시 발견한다"는 점을 이용해 **URL 시드만으로 충분하게
+  설계**했다 — 리플레이 경로를 영속화하는 복잡도를 아예 없앴다.
+- **매핑 실패는 확대 해석하지 않는다.** 대응 화면을 못 찾은 엔드포인트는
+  `unmatchedEndpoints`로만 남기고, 비슷한 화면에 억지로 붙이지 않는다(Phase 11과
+  같은 원칙).
+
+## Phase 19 — 프로그램 범위 한정 Explorer + 통합 리포트 ✅
+
+- [x] `Explorer`에 `allowedScope: AllowedScope | null` 생성자 파라미터 추가
+      (`impactHints`와 분리 — 힌트는 순서만 바꾸고, 이것은 범위 자체를 제한한다)
+- [x] 켜져 있으면 큐를 매핑된 화면의 URL로만 초기화하고, 그 화면에서 **새로운
+      다른 화면으로 이어지는 링크**만 확장하지 않는다(새 outcome `SKIPPED_SCOPE`).
+      같은 화면 안의 액션(폼·모달·탭)은 기존과 동일하게 전부 허용
+- [x] `run.ts` — 로그인 직후 베이스라인을 찾고(`findBaselineRun`), 매핑 결과를
+      `allowedScope`로 Explorer에 넘긴다. 매핑된 화면이 0개면 범위를 좁히지 않고
+      전체 탐색으로 안전하게 대체한다
+- [x] 리포트 §3-2 "검증 대상 프로그램 범위" — 입력 파일 → 매핑된 화면(신뢰도 표시) →
+      매핑 실패 항목. §3-3 "API 검증 결과" 신설
+- [x] `programScope.enabled === false`(기본값)면 `allowedScope`가 `null`이 되어
+      기존 Explorer 동작과 **완전히 동일**
+
+**DoD 결과 — 통과 (`phase19.programscope-explorer.test.ts` 5건, 실제 Chromium 2회 탐색)**
+
+| 검증 | 결과 |
+|---|---|
+| 매핑된 화면(부서관리)과 그 안의 모달만 방문 | 통과 |
+| 매핑되지 않은 다른 화면(사용자관리·설문관리·설정·대시보드)은 방문 안 함 | 통과 |
+| 범위 밖 링크는 `SKIPPED_SCOPE`로 기록되고 실행되지 않음 | 통과 |
+| `allowedScope=null` → 전체 화면 방문 (Phase 2와 동일한 화면 집합) | 통과 |
+| `allowedScope=null` → `SKIPPED_SCOPE` 0건 (회귀 없음) | 통과 |
+
+### 확정된 설계
+
+- **`impactHints`와 절대 같은 필드에 얹지 않는다.** 힌트는 비파괴적으로 순서만
+  바꾸고, 예산이 남는 한 전부 본다는 Phase 10의 원칙이 있다. 범위 제한은 정반대
+  성격(대상을 실제로 줄인다)이라 섞으면 두 기능 다 설명할 수 없어진다.
+- **"같은 화면 안의 액션"과 "새 화면으로 가는 링크"를 가르는 지점은 이미 코드에
+  있었다.** Explorer는 `<a href>` 기반 이동(새 화면 후보)과, 클릭으로 같은 URL
+  위에서 상태만 바뀌는 것(모달·탭)을 애초에 다른 경로로 처리하고 있었다 —
+  범위 제한은 **전자에만** 게이트를 하나 추가하면 됐다. 새 탐색 로직을 만들지
+  않았다.
+- **매핑된 화면이 0개면 범위를 제한하지 않는다.** 빈 시드로 Explorer를 돌리면
+  "0개 화면, 결함 0건"이라는 조용한 거짓 안심을 준다. 빈 결과보다 전체 탐색이
+  안전하다 — 그리고 그 사실을 로그와 리포트에 남긴다.
+
+---
+
 ## 운영 규칙
 
 - Phase당 브랜치 1개. **DoD를 테스트로 먼저 작성**한 뒤 구현한다.

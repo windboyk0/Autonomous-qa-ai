@@ -64,6 +64,83 @@ describe("redactRunConfig", () => {
     redactRunConfig(cfg);
     expect(cfg.login.password).toBe("secret-pw");
   });
+
+  it("apiVerify.bearerToken도 마스킹한다", () => {
+    const cfg = RunConfig.parse({ ...base, apiVerify: { bearerToken: "secret-token-abc" } });
+    const out = redactRunConfig(cfg);
+    expect(out.apiVerify.bearerToken).toBe("***REDACTED***");
+    expect(JSON.stringify(out)).not.toContain("secret-token-abc");
+  });
+
+  it("bearerToken이 비어 있으면 빈 문자열을 유지한다", () => {
+    const cfg = RunConfig.parse(base);
+    expect(redactRunConfig(cfg).apiVerify.bearerToken).toBe("");
+  });
+});
+
+/**
+ * 4부(API 검증 + 프로그램 범위) — 두 기능 모두 기본이 꺼짐이고,
+ * 꺼진 상태에서는 기존 파이프라인과 동작이 완전히 같아야 한다(§30 회귀 원칙).
+ */
+describe("apiVerify 기본값", () => {
+  it("기본은 꺼짐이고, manualCases는 비어 있다", () => {
+    const cfg = RunConfig.parse(base).apiVerify;
+    expect(cfg.enabled).toBe(false);
+    expect(cfg.manualCases).toEqual([]);
+    expect(cfg.specSource).toBe("openapi");
+  });
+
+  it("쓰기 메서드 자동 실행은 기본이 꺼짐이다", () => {
+    expect(RunConfig.parse(base).apiVerify.allowWriteMethods).toBe(false);
+  });
+
+  it("인증 모드 기본은 세션 재사용이다", () => {
+    expect(RunConfig.parse(base).apiVerify.authMode).toBe("reuse-session");
+  });
+
+  it("manualCases의 method/path가 없으면 거부한다", () => {
+    expect(
+      RunConfig.safeParse({
+        ...base,
+        apiVerify: { enabled: true, manualCases: [{ method: "GET" }] },
+      }).success,
+    ).toBe(false);
+  });
+
+  it("manualCases 하나만 있어도 파싱된다", () => {
+    const cfg = RunConfig.parse({
+      ...base,
+      apiVerify: { enabled: true, manualCases: [{ method: "GET", path: "/api/users" }] },
+    }).apiVerify;
+    expect(cfg.manualCases[0]).toMatchObject({
+      method: "GET",
+      path: "/api/users",
+      expectedStatus: [],
+      requiresAuth: false,
+    });
+  });
+});
+
+describe("programScope 기본값", () => {
+  it("기본은 꺼짐이고, 소스 파일 목록은 비어 있다", () => {
+    const cfg = RunConfig.parse(base).programScope;
+    expect(cfg.enabled).toBe(false);
+    expect(cfg.sourceFiles).toEqual([]);
+    expect(cfg.sourceFilesListPath).toBe("");
+  });
+
+  it("최소 신뢰도 기본값은 0.5다", () => {
+    expect(RunConfig.parse(base).programScope.minConfidence).toBe(0.5);
+  });
+
+  it("신뢰도는 0~1 범위를 벗어나면 거부한다", () => {
+    expect(
+      RunConfig.safeParse({ ...base, programScope: { minConfidence: 1.5 } }).success,
+    ).toBe(false);
+    expect(
+      RunConfig.safeParse({ ...base, programScope: { minConfidence: -0.1 } }).success,
+    ).toBe(false);
+  });
 });
 
 describe("RunConfig 기본값", () => {

@@ -229,6 +229,76 @@ export function renderReport(input: {
       "",
     );
   }
+  // ── 3-2. 검증 대상 프로그램 범위 ────────────────────────────────────
+  /*
+   * §2.7 "기존 §3-1을 일반화" — 화면 자체를 좁히는 기능이라 근거를 숨기면 안 된다.
+   * 매핑 실패는 확대 해석하지 않고 미검증 표로 그대로 보여준다.
+   */
+  if (summary.programScope) {
+    const ps = summary.programScope;
+    push("## 3-2. 검증 대상 프로그램 범위", "");
+    push("| 항목 | 값 |", "|---|---|");
+    push(`| 입력 파일 | ${ps.inputFiles.length}개 |`);
+    push(`| 베이스라인(과거 전체 탐색) | ${ps.baselineFound ? `있음 (${ps.baselineRunId})` : "없음 — 이번 Run은 전체 탐색으로 대체"} |`);
+    push(`| 매핑된 화면 | ${ps.mappedScreens.length}개 |`, "");
+    if (ps.inputFiles.length > 0) {
+      push("**입력 파일**");
+      push(...ps.inputFiles.slice(0, 30).map((f) => `- ${f}`));
+      if (ps.inputFiles.length > 30) push(`- … 외 ${ps.inputFiles.length - 30}개`);
+      push("");
+    }
+    if (ps.mappedScreens.length > 0) {
+      push("**매핑된 화면**", "", "| 화면 | URL | 신뢰도 |", "|---|---|---|");
+      push(
+        ...ps.mappedScreens.map(
+          (s) => `| ${s.screenName} | ${s.url} | ${s.confidence >= 1 ? "확정" : `추정 ${Math.round(s.confidence * 100)}%`} |`,
+        ),
+      );
+      push("");
+    }
+    if (ps.unmatched.length > 0) {
+      push("**매핑 실패 (미검증)**");
+      push(...ps.unmatched.map((u) => `- ${u}`));
+      push("");
+    }
+    if (ps.notes.length > 0) {
+      push("**판단 근거와 한계**");
+      push(...ps.notes.map((n) => `- ${n}`));
+      push("");
+    }
+    push(
+      ps.mappedScreens.length > 0
+        ? "이 화면들만 탐색했습니다. 매핑되지 않은 화면은 방문하지 않았습니다."
+        : "범위를 좁히지 못해 전체 탐색으로 진행했습니다.",
+      "",
+    );
+  }
+
+  // ── 3-3. API 검증 결과 ──────────────────────────────────────────────
+  if (summary.apiVerify) {
+    const av = summary.apiVerify;
+    push("## 3-3. API 검증 결과", "");
+    push(
+      "| 항목 | 값 |",
+      "|---|---|",
+      `| 실행 | ${av.executed}건 |`,
+      `| PASS | ${av.pass}건 |`,
+      `| FAIL | ${av.fail}건 |`,
+      `| 미실행(안전 정책) | ${av.plannedNotExecuted.length}건 |`,
+    );
+    push("");
+    if (av.plannedNotExecuted.length > 0) {
+      push("**계획만 세우고 실행하지 않은 케이스**");
+      push(...av.plannedNotExecuted.map((p) => `- ${p}`));
+      push("");
+    }
+    if (av.notes.length > 0) {
+      push("**참고**");
+      push(...av.notes.map((n) => `- ${n}`));
+      push("");
+    }
+  }
+
   // ── 4. CRUD 결과 ────────────────────────────────────────────────────
   push(
     "## 4. CRUD 결과",

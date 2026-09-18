@@ -58,6 +58,20 @@ const USAGE = `
   --allow-test             이 프로젝트의 테스트·린트를 실행한다 (동의)
   --allow-build            이 프로젝트의 빌드를 실행한다 (동의)
 
+API 검증 (화면과 무관하게 엔드포인트를 직접 호출)
+  --api-verify              활성화. 기본은 꺼짐
+  --api-spec <PATH>          openapi.json/yaml 경로
+  --api-allow-write          POST/PUT/PATCH를 계획만 세우지 않고 실행 (AUTO-QA 마커 필요)
+  --api-auth <MODE>          reuse-session(기본) | bearer | none
+  --api-token-stdin          bearer 토큰을 stdin 둘째 줄로 읽는다 (auth=bearer 일 때)
+  --api-timeout <MS>         호출당 상한, 기본 15000
+
+프로그램 범위 한정 (소스 파일 목록 → 연관 화면만 탐색)
+  --program-scope                   활성화. 기본은 꺼짐
+  --program-files <a.java,b.tsx>    콤마로 구분한 프로그램 소스 파일 목록
+  --program-file-list <PATH>        한 줄에 한 경로씩 적은 파일
+  --program-min-confidence <0~1>    매핑 신뢰도 하한. 기본 0.5
+
 로그인
   --user <ID>              로그인 아이디
   --no-login               로그인 없이 탐색
@@ -100,6 +114,21 @@ async function readPasswordFromStdin(): Promise<string> {
 }
 
 /**
+ * stdin 앞의 `count`줄을 읽는다. 비밀번호와 bearer 토큰이 같은 파이프를 나눠 쓸 수 있게
+ * `--pass-stdin` + `--api-token-stdin`를 함께 쓰면 1번째 줄이 비밀번호, 2번째 줄이 토큰이다.
+ */
+async function readStdinLines(count: number): Promise<string[]> {
+  if (process.stdin.isTTY || count <= 0) return [];
+  const chunks: Buffer[] = [];
+  for await (const chunk of process.stdin) {
+    chunks.push(chunk as Buffer);
+    const lines = Buffer.concat(chunks).toString("utf8").split(/\r?\n/);
+    if (lines.length > count) break;
+  }
+  return Buffer.concat(chunks).toString("utf8").split(/\r?\n/).slice(0, count);
+}
+
+/**
  * 비밀번호 출처를 정한다.
  *
  * `--pass`는 편의를 위해 남겨두지만 셸 히스토리와 OS 프로세스 목록에 평문으로 남는다.
@@ -126,7 +155,25 @@ async function resolvePassword(args: RawArgs): Promise<{ password: string; warni
   return { password: "", warning: null };
 }
 
-function buildConfig(args: RawArgs, password: string): RunConfig {
+/**
+ * bearer 토큰 출처. 비밀번호와 같은 이유로 stdin을 권장한다.
+ *
+ * `--pass-stdin`와 `--api-token-stdin`를 함께 쓰면 같은 stdin 파이프를 나눠 써야 하므로,
+ * 비밀번호가 1번째 줄을 먼저 가져간 뒤 토큰이 2번째 줄을 읽는다.
+ */
+async function resolveBearerToken(
+  args: RawArgs,
+  passwordAlreadyConsumedStdin: boolean,
+): Promise<string> {
+  const fromEnv = process.env.QA_API_BEARER_TOKEN;
+  if (fromEnv) return fromEnv;
+  if (args["api-token-stdin"] !== true) return "";
+
+  const lines = await readStdinLines(passwordAlreadyConsumedStdin ? 2 : 1);
+  return (passwordAlreadyConsumedStdin ? lines[1] : lines[0]) ?? "";
+}
+
+function buildConfig(args: RawArgs, password: string, bearerToken: string): RunConfig {
   const url = typeof args.url === "string" ? args.url : "";
   const sourceDir = typeof args.source === "string" ? args.source : "";
   const packageName = typeof args.package === "string" ? args.package : "";
@@ -202,6 +249,28 @@ function buildConfig(args: RawArgs, password: string): RunConfig {
       maxScreens: num("max-screens", 120),
       maxDurationMs: num("max-duration", 15 * 60 * 1000),
     },
+    apiVerify: {
+      enabled: args["api-verify"] === true,
+      specSource: str("api-spec") ? "openapi" : "manual",
+      specPath: str("api-spec"),
+      allowWriteMethods: args["api-allow-write"] === true,
+      authMode: (["reuse-session", "bearer", "none"] as const).includes(
+        str("api-auth", "reuse-session") as never,
+      )
+        ? (str("api-auth", "reuse-session") as "reuse-session" | "bearer" | "none")
+        : "reuse-session",
+      bearerToken,
+      timeoutMs: num("api-timeout", 15_000),
+    },
+    programScope: {
+      enabled: args["program-scope"] === true,
+      sourceFiles: str("program-files")
+        .split(",")
+        .map((f) => f.trim())
+        .filter(Boolean),
+      sourceFilesListPath: str("program-file-list"),
+      minConfidence: num("program-min-confidence", 0.5),
+    },
     outDir: str("out", "runs"),
   });
 
@@ -271,10 +340,12 @@ async function main(): Promise<void> {
   }
 
   const { password, warning } = await resolvePassword(args);
-  const config = buildConfig(args, password);
+  const bearerToken = await resolveBearerToken(args, args["pass-stdin"] === true);
+  const config = buildConfig(args, password, bearerToken);
 
-  // 비밀번호는 이 시점 이후 모든 출력에서 자동 마스킹된다.
+  // 비밀번호·토큰은 이 시점 이후 모든 출력에서 자동 마스킹된다.
   if (config.login.password) registerSecret(config.login.password);
+  if (config.apiVerify.bearerToken) registerSecret(config.apiVerify.bearerToken);
   if (warning) log("warn", warning);
 
   if (config.crud.delete && !config.crud.deleteConsent) {

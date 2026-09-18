@@ -12,18 +12,26 @@ import {
   type RunStatus,
   type RunSummary,
 } from "@qa/shared";
+import { dirname } from "node:path";
 import { emit, log } from "./emitter.js";
 import { launch, preflightBrowser } from "./browser.js";
 import { Collector } from "./collector.js";
 import { captureScreen } from "./capture.js";
 import { login } from "./login.js";
 import type { RunContext } from "./run-context.js";
-import { Explorer, makeStartPlan, type ExploreResult } from "./explorer.js";
+import { Explorer, makeStartPlan, type AllowedScope, type ExploreResult } from "./explorer.js";
 import { judge } from "./judge.js";
 import { runSourceQa, type SourceQaOutcome } from "./source/run-source.js";
 import { computeImpact, gitChangedFiles, type ChangeImpact } from "./source/change-impact.js";
 import { attachCodeRefs, buildApiIndex } from "./source/api-map.js";
 import { scanProject } from "./source/scan.js";
+import {
+  findBaselineRun,
+  loadBaselineScreens,
+  mapProgramScope,
+  type ProgramScopeResult,
+} from "./source/program-scope.js";
+import { verifyApis, type ApiVerifyOutcome } from "./api-verify.js";
 import { renderReport } from "./report.js";
 import { AiGuard, createProvider, enrich, passthrough, type EnrichResult } from "./ai/index.js";
 import { NO_CONTROL, type RunControl } from "./control.js";
@@ -170,6 +178,8 @@ function buildSummary(input: {
   stopped?: boolean;
   source?: SourceQaOutcome | null;
   impact?: ChangeImpact | null;
+  apiVerify?: ApiVerifyOutcome | null;
+  programScope?: ProgramScopeResult | null;
 }): RunSummary {
   const { runId, config, startedAt, explored, issues } = input;
   const finishedAt = new Date();
@@ -206,10 +216,41 @@ function buildSummary(input: {
           notes: input.impact.notes,
         }
       : null,
+    apiVerify: input.apiVerify
+      ? {
+          executed: input.apiVerify.executed,
+          pass: input.apiVerify.pass,
+          fail: input.apiVerify.fail,
+          plannedNotExecuted: input.apiVerify.plannedNotExecuted,
+          notes: input.apiVerify.notes,
+        }
+      : null,
+    programScope: input.programScope
+      ? {
+          inputFiles: input.programScope.inputFiles,
+          baselineFound: input.programScope.baselineFound,
+          baselineRunId: input.programScope.baselineRunId,
+          mappedScreens: input.programScope.mappedScreens.map((s) => ({
+            screenName: s.screenName,
+            url: s.url,
+            confidence: s.confidence,
+          })),
+          unmatched: input.programScope.unmatchedEndpoints,
+          notes: input.programScope.notes,
+        }
+      : null,
     unverifiedAreas: [
       ...unverifiedAreas(explored.actionResults, config),
       // 소스 QA 가 하지 않은 것도 같은 자리에 적는다. 모드가 달라도 "안 본 것"은 하나다.
       ...(input.source?.unverified ?? []),
+      // API 직접 검증에서 안전 정책으로 실행하지 않은 것도 "안 본 것"이다.
+      ...(input.apiVerify?.plannedNotExecuted.map((p) => `API 검증 미실행: ${p}`) ?? []),
+      // 프로그램 범위에 매핑되지 않은 엔드포인트도 조용히 넘기지 않는다.
+      ...(input.programScope && input.programScope.unmatchedEndpoints.length > 0
+        ? [
+            `프로그램 범위: 다음 엔드포인트에 대응하는 화면을 찾지 못했습니다: ${input.programScope.unmatchedEndpoints.join(", ")}`,
+          ]
+        : []),
       // 정리하지 못한 테스트 데이터는 **식별자와 함께** 반드시 남긴다.
       // 사용자가 직접 지울 수 있어야 한다.
       ...(input.leftovers ?? []).map((l) => `정리되지 않은 테스트 데이터: ${l}`),
@@ -584,6 +625,67 @@ export async function runQa(
      */
     const aiReady = await preflightAi(config, options.createProvider ?? createProvider);
 
+    /*
+     * API 검증은 탐색이 세션을 흔들기 **전에**, 로그인 직후의 깨끗한 상태에서 돈다
+     * (CLAUDE.md 4부 §1.3). 실패해도 던지지 않는다 — 이 기능이 죽어도 탐색은 이어진다.
+     */
+    let apiVerifyOutcome: ApiVerifyOutcome | null = null;
+    if (config.apiVerify.enabled) {
+      try {
+        apiVerifyOutcome = await verifyApis({ config, ctx, session, loginOk: result.success });
+      } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        log("error", `API 검증이 예기치 않게 실패했습니다: ${reason}`);
+        apiVerifyOutcome = {
+          candidates: [],
+          executed: 0,
+          pass: 0,
+          fail: 0,
+          plannedNotExecuted: [],
+          notes: [`API 검증이 예기치 않게 실패했습니다: ${reason}`],
+        };
+      }
+    }
+
+    /*
+     * 프로그램 범위 한정도 Explorer 생성 **전에** 계산해야 시드로 넘길 수 있다
+     * (CLAUDE.md 4부 §2.4~2.5).
+     */
+    let programScopeResult: ProgramScopeResult | null = null;
+    let allowedScope: AllowedScope | null = null;
+    if (config.programScope.enabled && config.source.rootDir.trim() !== "") {
+      const scan = scanProject(config.source.rootDir, {
+        maxFiles: config.source.maxFiles,
+        maxFileBytes: config.source.maxFileBytes,
+        maxTotalBytes: config.source.maxTotalBytes,
+      });
+      const outDirAbs = dirname(ctx.runDir);
+      const baselineRun = findBaselineRun(outDirAbs, ctx.runId);
+      const baselineScreens = baselineRun ? loadBaselineScreens(baselineRun.runDir) : null;
+      programScopeResult = mapProgramScope({
+        rootDir: config.source.rootDir,
+        scan,
+        cfg: config.programScope,
+        baseline: baselineScreens,
+        baselineRunId: baselineRun?.runId ?? null,
+      });
+      log(
+        "info",
+        `프로그램 범위: 입력 파일 ${programScopeResult.inputFiles.length}개 → ` +
+          `화면 ${programScopeResult.mappedScreens.length}개 매핑` +
+          (programScopeResult.baselineFound ? "" : " (베이스라인 없음 → 전체 탐색으로 대체)"),
+      );
+      if (programScopeResult.seedUrls.length > 0) {
+        allowedScope = {
+          seedUrls: programScopeResult.seedUrls,
+          allowedPathTemplates: programScopeResult.allowedPathTemplates,
+        };
+      } else if (programScopeResult.baselineFound) {
+        // 매핑된 화면이 0개면 범위를 좁히지 않는다 — 빈 Run보다 전체 탐색이 안전하다.
+        log("warn", "programScope: 매핑된 화면이 없어 범위를 제한하지 않고 전체 탐색으로 진행합니다.");
+      }
+    }
+
     // ── 자율 탐색 ─────────────────────────────────────────────────────
     // 변경 영향은 탐색 **전에** 계산해야 순서에 반영된다.
     const impact = computeChangeImpact(config);
@@ -594,6 +696,7 @@ export async function runQa(
       config,
       options.control ?? NO_CONTROL,
       impact?.hints ?? [],
+      allowedScope,
     );
     const explored = await explorer.explore(makeStartPlan(result.landedUrl));
 
@@ -639,7 +742,12 @@ export async function runQa(
         ? runSourceQa(config, ctx, { screensExplored: explored.graph.nodes.length })
         : null;
     const judged = judge(
-      [...explored.candidates, ...crudOutcome.candidates, ...(sourceOutcome?.candidates ?? [])],
+      [
+        ...explored.candidates,
+        ...crudOutcome.candidates,
+        ...(sourceOutcome?.candidates ?? []),
+        ...(apiVerifyOutcome?.candidates ?? []),
+      ],
       explored.graph,
     );
     log(
@@ -711,6 +819,8 @@ export async function runQa(
           }
         : null,
       impact,
+      apiVerify: apiVerifyOutcome,
+      programScope: programScopeResult,
       leftovers: leftovers.map((r) => `${r.marker} (${r.screen}) — ${r.cleanupError ?? "사유 미상"}`),
       stopped: options.control?.stopped ?? false,
     });

@@ -42,6 +42,8 @@ export const ActionOutcome = z.enum([
   "SKIPPED_DENYLIST",
   "SKIPPED_LOW_CONFIDENCE",
   "SKIPPED_VISITED",
+  /** programScope가 켜져 있을 때, 매핑된 화면 밖으로 이어지는 링크 (CLAUDE.md 4부 §2.5) */
+  "SKIPPED_SCOPE",
   "FAILED",
 ]);
 export type ActionOutcome = z.infer<typeof ActionOutcome>;

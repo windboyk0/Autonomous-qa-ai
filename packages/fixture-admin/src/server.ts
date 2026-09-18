@@ -1,5 +1,6 @@
 import http from "node:http";
-import { URL, pathToFileURL } from "node:url";
+import { dirname, resolve } from "node:path";
+import { URL, fileURLToPath, pathToFileURL } from "node:url";
 import {
   users,
   surveys,
@@ -26,6 +27,12 @@ import {
   settingsPage,
   notFoundPage,
 } from "./pages.js";
+
+/**
+ * `/api/*` 정답지 (Phase 17 API 검증 채점 기준). 값이 아니라 경로만 내보낸다 —
+ * spec 파일 자체가 채점 대상이므로 여기서 다시 파싱하지 않는다.
+ */
+export const FIXTURE_ADMIN_OPENAPI_PATH = resolve(dirname(fileURLToPath(import.meta.url)), "..", "openapi.json");
 
 const DEFAULT_PORT = Number(process.env.FIXTURE_PORT ?? 3100);
 const SESSION_COOKIE = "fixture_sid";
